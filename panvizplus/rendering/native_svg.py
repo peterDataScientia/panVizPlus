@@ -8,6 +8,7 @@ from math import cos, pi, sin
 import numpy as np
 
 from panvizplus.chemistry.models import NormalizedStructure
+from panvizplus.chemistry.rdkit_layer import build_ligand_chemistry, ligand_2d_coordinates
 from panvizplus.interactions.models import InteractionRecord
 
 
@@ -55,12 +56,16 @@ def render_interaction_svg(
     records: list[InteractionRecord],
     width: int = 1200,
     height: int = 820,
+    ligand_net_charge: int | None = None,
 ) -> str:
     ligand = [a for a in structure.ligand_atoms(ligand_selector) if not a.is_hydrogen]
     if not ligand:
         raise ValueError("Selected ligand has no heavy atoms.")
 
-    coords = _project_ligand(ligand, width, height)
+    chemistry = build_ligand_chemistry(
+        structure, ligand_selector, net_charge=ligand_net_charge
+    )
+    coords = _project_ligand_rdkit(chemistry, ligand, width, height)
     atom_by_name = {a.name: a for a in ligand}
     ligand_center = (
         float(np.mean([xy[0] for xy in coords.values()])),
@@ -97,7 +102,8 @@ def render_interaction_svg(
         if left in ligand_ids and right in ligand_ids:
             x1, y1 = coords[left]
             x2, y2 = coords[right]
-            parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#333" stroke-width="2.1"/>')
+            order = chemistry.bond_orders.get(tuple(sorted((left, right))), 1.0)
+            parts.extend(_bond_svg(x1, y1, x2, y2, order))
 
     for rec in records:
         key = (rec.residue_name, rec.residue_number, rec.chain_id or "-")
@@ -149,30 +155,50 @@ def render_interaction_svg(
     return "".join(parts)
 
 
-def _project_ligand(atoms, width, height):
-    pts = np.asarray([a.coord for a in atoms], dtype=float)
-    centered = pts - pts.mean(axis=0)
-    if len(atoms) >= 3:
-        _, _, vh = np.linalg.svd(centered, full_matrices=False)
-        xy = centered @ vh[:2].T
-    elif len(atoms) == 2:
-        xy = np.array([[-1.0, 0.0], [1.0, 0.0]])
-    else:
-        xy = np.array([[0.0, 0.0]])
 
-    xmin, ymin = xy.min(axis=0)
-    xmax, ymax = xy.max(axis=0)
-    xr = max(xmax - xmin, 1.0)
-    yr = max(ymax - ymin, 1.0)
+def _project_ligand_rdkit(chemistry, atoms, width, height):
+    raw = ligand_2d_coordinates(chemistry)
+    ids = [a.atom_id for a in atoms if a.atom_id in raw]
+    pts = np.asarray([raw[i] for i in ids], dtype=float)
+    if pts.size == 0:
+        return {a.atom_id: (width / 2, height / 2) for a in atoms}
+
+    xmin, ymin = pts.min(axis=0)
+    xmax, ymax = pts.max(axis=0)
+    xr = max(float(xmax - xmin), 1.0)
+    yr = max(float(ymax - ymin), 1.0)
     max_w, max_h = width * 0.38, height * 0.46
     scale = min(max_w / xr, max_h / yr)
     cx, cy = width / 2, height / 2
-    mean = xy.mean(axis=0)
+    mean = pts.mean(axis=0)
     return {
-        atom.atom_id: (cx + (xy[i, 0] - mean[0]) * scale, cy - (xy[i, 1] - mean[1]) * scale)
-        for i, atom in enumerate(atoms)
+        a.atom_id: (
+            cx + (raw[a.atom_id][0] - mean[0]) * scale,
+            cy - (raw[a.atom_id][1] - mean[1]) * scale,
+        )
+        for a in atoms
+        if a.atom_id in raw
     }
 
+
+def _bond_svg(x1, y1, x2, y2, order):
+    base = f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#333" stroke-width="2.1"/>'
+    if order < 1.5:
+        return [base]
+    dx, dy = x2 - x1, y2 - y1
+    length = max((dx * dx + dy * dy) ** 0.5, 1e-6)
+    ox, oy = -dy / length * 3.0, dx / length * 3.0
+    second = (
+        f'<line x1="{x1+ox:.1f}" y1="{y1+oy:.1f}" '
+        f'x2="{x2+ox:.1f}" y2="{y2+oy:.1f}" stroke="#333" stroke-width="1.6"/>'
+    )
+    if order >= 2.5:
+        third = (
+            f'<line x1="{x1-ox:.1f}" y1="{y1-oy:.1f}" '
+            f'x2="{x2-ox:.1f}" y2="{y2-oy:.1f}" stroke="#333" stroke-width="1.4"/>'
+        )
+        return [base, second, third]
+    return [base, second]
 
 def _ligand_anchor(rec, atom_by_name, coords, center):
     site = str(rec.ligand_site)

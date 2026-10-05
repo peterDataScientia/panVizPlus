@@ -9,14 +9,24 @@ from panvizplus.interactions.engine import analyze_structure
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="panvizplus",
-        description="Run the native panVizPlus protein-ligand interaction engine.",
+        description="Run RDKit chemistry perception and panVizPlus interaction rules.",
     )
     parser.add_argument("structure", help="PDB structure file")
     parser.add_argument("--ligand", required=True, help="Ligand selector RESNAME:CHAIN:RESNUM")
+    parser.add_argument(
+        "--ligand-charge",
+        type=int,
+        default=0,
+        help="Ligand net formal charge used for RDKit bond-order perception.",
+    )
     args = parser.parse_args()
 
     structure = read_pdb(args.structure)
-    records = analyze_structure(structure, args.ligand)
+    records = analyze_structure(
+        structure,
+        args.ligand,
+        ligand_net_charge=args.ligand_charge,
+    )
     for warning in structure.warnings:
         print(f"WARNING: {warning}")
 

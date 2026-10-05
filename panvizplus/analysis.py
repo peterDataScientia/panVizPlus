@@ -12,9 +12,15 @@ def analyze_pdb(
     path: str | Path,
     ligand_selector: str,
     ruleset: dict | None = None,
+    ligand_net_charge: int | None = None,
 ) -> tuple[list[InteractionRecord], list[str]]:
-    """Analyze one ligand residue with the native panVizPlus engine."""
+    """Analyze one ligand residue with RDKit chemistry + panVizPlus interaction rules."""
     structure = read_pdb(path)
     rules = ruleset or load_ruleset()
-    interactions = analyze_structure(structure, ligand_selector, rules)
+    interactions = analyze_structure(
+        structure,
+        ligand_selector,
+        rules,
+        ligand_net_charge=ligand_net_charge,
+    )
     return interactions, structure.warnings

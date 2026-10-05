@@ -1,11 +1,12 @@
 metadata:
   id: panvizplus_v1
-  version: 0.2.0-alpha
+  version: 0.3.0-alpha
   status: alpha
   exact_biovia_reproduction: false
   scientific_position: >
-    Native panVizPlus interaction rules. The engine uses explicit, inspectable
-    criteria and does not claim exact reproduction of proprietary implementations.
+    RDKit supplies ligand chemistry perception while panVizPlus applies explicit,
+    inspectable protein-ligand interaction criteria. The engine does not claim
+    exact reproduction of proprietary implementations.
     Each interaction class exposes explicit chemical and geometric criteria.
   units:
     distance: angstrom

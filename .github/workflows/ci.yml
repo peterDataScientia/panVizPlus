@@ -23,6 +23,7 @@ jobs:
             exit 1
           fi
       - run: python -m compileall -q app.py panvizplus
+      - run: python -c "import rdkit; print('RDKit', rdkit.__version__)"
       - run: which obabel && obabel -V
       - run: pytest -q
       - name: Streamlit boot smoke test

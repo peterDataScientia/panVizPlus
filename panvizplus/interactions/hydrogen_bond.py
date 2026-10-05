@@ -257,16 +257,27 @@ def _site_label(atom: Atom) -> str:
 
 
 def _deduplicate(records: list[InteractionRecord]) -> list[InteractionRecord]:
-    seen: set[tuple[str, str, str]] = set()
-    out: list[InteractionRecord] = []
+    """Keep one physical ligand-protein atom-pair H-bond.
+
+    A donor/acceptor pair can be perceived in both directions when both sites
+    are chemically amphoteric. The displayed scientific interaction is the
+    atom pair, so retain the geometrically better orientation instead of
+    reporting two copies of the same contact.
+    """
+    best: dict[tuple[str, str, str], InteractionRecord] = {}
     for record in records:
-        key = (
-            str(record.metadata.get("donor_site")),
-            str(record.metadata.get("acceptor_site")),
-            record.interaction_type,
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(record)
-    return out
+        key = (record.ligand_site, record.protein_site, record.interaction_type)
+        current = best.get(key)
+        if current is None or _geometry_score(record) > _geometry_score(current):
+            best[key] = record
+    return list(best.values())
+
+
+def _geometry_score(record: InteractionRecord) -> tuple[int, float]:
+    explicit = 1 if record.metadata.get("geometry_mode") == "explicit_hydrogen" else 0
+    angles = [
+        float(value)
+        for name, value in record.measurements.items()
+        if name.endswith("_angle") and isinstance(value, (int, float))
+    ]
+    return explicit, min(angles) if angles else 0.0

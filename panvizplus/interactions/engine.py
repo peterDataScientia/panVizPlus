@@ -15,7 +15,8 @@ from typing import Iterable
 import numpy as np
 
 from panvizplus.chemistry.features import ChemicalFeature, perceive_hbond_features
-from panvizplus.chemistry.models import Atom, COMMON_ION_ELEMENTS, NormalizedStructure
+from panvizplus.chemistry.models import Atom, NormalizedStructure
+from panvizplus.chemistry.rdkit_layer import LigandChemistry, build_ligand_chemistry
 from panvizplus.interactions.hydrogen_bond import detect_conventional_hbonds
 from panvizplus.interactions.models import CriterionResult, InteractionRecord
 from panvizplus.rules import load_ruleset
@@ -71,17 +72,25 @@ def analyze_structure(
     structure: NormalizedStructure,
     ligand_residue_name: str,
     ruleset: dict | None = None,
+    ligand_net_charge: int | None = None,
 ) -> list[InteractionRecord]:
-    """Run all current native panVizPlus interaction detectors."""
+    """Run native panVizPlus interaction rules using RDKit ligand chemistry."""
     rules = ruleset or load_ruleset()
+    chemistry = build_ligand_chemistry(
+        structure,
+        ligand_residue_name,
+        net_charge=ligand_net_charge,
+    )
     records: list[InteractionRecord] = []
-    records.extend(detect_conventional_hbonds(structure, ligand_residue_name, rules))
-    records.extend(_detect_hydrophobic(structure, ligand_residue_name, rules))
-    records.extend(_detect_salt_bridges(structure, ligand_residue_name, rules))
-    records.extend(_detect_pi_interactions(structure, ligand_residue_name, rules))
+    records.extend(detect_conventional_hbonds(
+        structure, ligand_residue_name, rules, ligand_chemistry=chemistry
+    ))
+    records.extend(_detect_hydrophobic(structure, ligand_residue_name, rules, chemistry))
+    records.extend(_detect_salt_bridges(structure, ligand_residue_name, rules, chemistry))
+    records.extend(_detect_pi_interactions(structure, ligand_residue_name, rules, chemistry))
     records.extend(_detect_halogen_bonds(structure, ligand_residue_name, rules))
-    records.extend(_detect_metal_coordination(structure, ligand_residue_name, rules))
-    records.extend(_detect_water_bridges(structure, ligand_residue_name, rules))
+    records.extend(_detect_metal_coordination(structure, ligand_residue_name, rules, chemistry))
+    records.extend(_detect_water_bridges(structure, ligand_residue_name, rules, chemistry))
     records.extend(_detect_unfavorable_bumps(structure, ligand_residue_name, rules))
     return sorted(
         records,
@@ -94,9 +103,10 @@ def analyze_structure(
     )
 
 
-def _detect_hydrophobic(structure, ligand_name, rules):
+def _detect_hydrophobic(structure, ligand_name, rules, chemistry: LigandChemistry):
     cutoff = float(rules["interactions"]["hydrophobic_contact"]["geometry"]["atom_distance_max"])
-    ligand = _ligand_hydrophobic_atoms(structure, ligand_name)
+    amap = structure.atom_map()
+    ligand = [amap[i] for i in chemistry.hydrophobe_atom_ids if i in amap]
     protein = [
         a for a in structure.protein_atoms()
         if a.name.upper() in PROTEIN_HYDROPHOBIC_ATOMS.get(a.residue_name.upper(), set())
@@ -115,15 +125,17 @@ def _detect_hydrophobic(structure, ligand_name, rules):
             f"HYD-{i:04d}", "hydrophobic_contact", la, pa, rules,
             {"distance": round(d, 3)},
             [CriterionResult("atom_distance", round(d, 3), "<=", cutoff, "angstrom", True)],
-            chemistry_confidence="medium",
-            chemistry_source="element_and_residue_template",
+            chemistry_confidence=chemistry.confidence,
+            chemistry_source=chemistry.source,
         ))
     return out
 
 
-def _detect_salt_bridges(structure, ligand_name, rules):
+def _detect_salt_bridges(structure, ligand_name, rules, chemistry: LigandChemistry):
     cutoff = float(rules["interactions"]["salt_bridge"]["geometry"]["charge_center_distance_max"])
-    ligand_pos, ligand_neg = _ligand_charge_sites(structure, ligand_name)
+    amap = structure.atom_map()
+    ligand_pos = [amap[i] for i in chemistry.positive_atom_ids if i in amap]
+    ligand_neg = [amap[i] for i in chemistry.negative_atom_ids if i in amap]
     protein_pos = [a for a in structure.protein_atoms() if (a.residue_name.upper(), a.name.upper()) in PROTEIN_POSITIVE]
     protein_neg = [a for a in structure.protein_atoms() if (a.residue_name.upper(), a.name.upper()) in PROTEIN_NEGATIVE]
     pairs = [(lp, pn) for lp in ligand_pos for pn in protein_neg]
@@ -136,14 +148,22 @@ def _detect_salt_bridges(structure, ligand_name, rules):
                 f"SALT-{len(out)+1:04d}", "salt_bridge", la, pa, rules,
                 {"distance": round(d, 3)},
                 [CriterionResult("charge_center_distance", round(d, 3), "<=", cutoff, "angstrom", True)],
-                chemistry_confidence="medium" if la.formal_charge else "low",
-                chemistry_source="formal_charge_or_connectivity_inference",
+                chemistry_confidence=chemistry.confidence,
+                chemistry_source=chemistry.source,
             ))
     return _dedup_residue_type(out)
 
 
-def _detect_pi_interactions(structure, ligand_name, rules):
-    ligand_rings = _ligand_rings(structure, ligand_name)
+def _detect_pi_interactions(structure, ligand_name, rules, chemistry: LigandChemistry):
+    ligand_rings = [
+        RingFeature(
+            tuple(ring),
+            f"{ligand_name}:aromatic_ring{idx}",
+            chemistry.source,
+            chemistry.confidence,
+        )
+        for idx, ring in enumerate(chemistry.aromatic_rings, 1)
+    ]
     protein_rings = _protein_rings(structure)
     out: list[InteractionRecord] = []
     pp = rules["interactions"]["pi_pi"]
@@ -205,7 +225,7 @@ def _detect_pi_interactions(structure, ligand_name, rules):
     # pi-cation in either orientation
     pc_rule = rules["interactions"]["pi_cation"]
     cat_max = float(pc_rule["geometry"]["center_distance_max"])
-    ligand_pos, _ = _ligand_charge_sites(structure, ligand_name)
+    ligand_pos = [amap[i] for i in chemistry.positive_atom_ids if i in amap]
     protein_pos = [a for a in structure.protein_atoms() if (a.residue_name.upper(), a.name.upper()) in PROTEIN_POSITIVE]
 
     for lr in ligand_rings:
@@ -236,8 +256,8 @@ def _detect_pi_interactions(structure, ligand_name, rules):
                     {"center_distance": round(d, 3)},
                     [CriterionResult("center_distance", round(d, 3), "<=", cat_max, "angstrom", True)],
                     protein_site=pr.label,
-                    chemistry_confidence="medium" if la.formal_charge else "low",
-                    chemistry_source="formal_charge_or_connectivity_inference",
+                    chemistry_confidence=chemistry.confidence,
+                    chemistry_source=chemistry.source,
                 ))
     return _dedup_residue_type(out)
 
@@ -283,9 +303,14 @@ def _detect_halogen_bonds(structure, ligand_name, rules):
     return _dedup_residue_type(out)
 
 
-def _detect_metal_coordination(structure, ligand_name, rules):
+def _detect_metal_coordination(structure, ligand_name, rules, chemistry: LigandChemistry):
     cutoff = float(rules["interactions"]["metal_coordination"]["geometry"]["distance_max"])
-    ligand_hetero = [a for a in structure.ligand_atoms(ligand_name) if a.element.upper() in {"N", "O", "S"}]
+    amap = structure.atom_map()
+    ligand_site_ids = chemistry.acceptor_atom_ids | chemistry.negative_atom_ids
+    ligand_hetero = [
+        amap[i] for i in ligand_site_ids
+        if i in amap and amap[i].element.upper() in {"N", "O", "S"}
+    ]
     protein_hetero = [a for a in structure.protein_atoms() if a.element.upper() in {"N", "O", "S"}]
     metals = [a for a in structure.atoms if a.element.upper() in METALS]
     out = []
@@ -311,9 +336,11 @@ def _detect_metal_coordination(structure, ligand_name, rules):
     return _dedup_residue_type(out)
 
 
-def _detect_water_bridges(structure, ligand_name, rules):
+def _detect_water_bridges(structure, ligand_name, rules, chemistry: LigandChemistry):
     cutoff = float(rules["interactions"]["water_bridge"]["geometry"]["heavy_atom_distance_max"])
-    protein_features, ligand_features = perceive_hbond_features(structure, ligand_name)
+    protein_features, ligand_features = perceive_hbond_features(
+        structure, ligand_name, chemistry
+    )
     amap = structure.atom_map()
     ligand_sites = [amap[f.atom_id] for f in ligand_features if f.kind in {"hydrogen_donor", "hydrogen_acceptor"}]
     protein_sites = [amap[f.atom_id] for f in protein_features if f.kind in {"hydrogen_donor", "hydrogen_acceptor"}]

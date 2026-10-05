@@ -1,28 +1,33 @@
 # panVizPlus
 
-**panVizPlus** is a native, provenance-aware protein–ligand interaction analysis engine and Streamlit application.
+**panVizPlus** is a provenance-aware protein–ligand interaction analysis engine and Streamlit application.
 
-## Scientific architecture
+## Architecture
 
 ```text
 PDB / PDBQT
    ↓
 structure normalization
    ↓
-chemical feature perception
+RDKit ligand chemistry
+   ├─ bond orders
+   ├─ formal charge
+   ├─ donor / acceptor features
+   ├─ ionizable sites
+   ├─ hydrophobes
+   ├─ aromatic rings
+   └─ 2D coordinates
    ↓
-panVizPlus interaction engine
-   ↓
-versioned geometric rules
+panVizPlus interaction rules
    ↓
 InteractionRecord[]
    ↓
-native 2D diagram + table + CSV/JSON/SVG
+native diagram + scientific table + CSV/JSON/SVG
 ```
 
-The interaction engine is implemented inside `panvizplus/interactions/`. It does not call an external protein–ligand interaction detector.
+RDKit is used as a **chemistry toolkit**, not as a protein–ligand interaction detector. Interaction classification, geometry, cutoffs, provenance, and rule versioning are implemented by panVizPlus.
 
-## Current native interaction families
+## Current interaction families
 
 - conventional hydrogen bond
 - hydrophobic contact
@@ -35,29 +40,22 @@ The interaction engine is implemented inside `panvizplus/interactions/`. It does
 - water bridge
 - unfavorable van der Waals contact
 
-Every interaction record stores ligand/protein sites, residue identity, measurements, criteria, detector version, ruleset version, chemistry-confidence metadata, and provenance.
+## Ligand chemistry
 
-## Chemistry policy
+For PDB/PDBQT workflows panVizPlus builds the ligand molecular graph, uses RDKit bond-order perception and `BaseFeatures.fdef` chemical features, and asks the user for the ligand net charge used in perception. PDB input alone is not treated as authoritative for protonation or bond order.
 
-PDB-only ligand chemistry can be incomplete. panVizPlus therefore marks connectivity-derived ligand chemical features with lower confidence instead of silently treating them as authoritative. PDBQT files are converted to PDB for coordinate/connectivity normalization; Open Babel is used only as a file-format converter.
-
-## Run locally
+## Run
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Streamlit Community Cloud
-
+Streamlit Community Cloud:
 - repository: `peterDataScientia/panVizPlus`
 - branch: `main`
 - entrypoint: `app.py`
 
-## Rule registry
+Scientific defaults are versioned in `panvizplus/rules/panvizplus_v1.yaml`.
 
-Scientific defaults are stored in:
-
-`panvizplus/rules/panvizplus_v1.yaml`
-
-Version `0.2.0-alpha` is an alpha scientific implementation. Rule thresholds are explicit and benchmarkable and are not presented as exact reproductions of proprietary software.
+Version `0.3.0-alpha` introduces the RDKit chemistry layer while retaining panVizPlus-native interaction detection.
