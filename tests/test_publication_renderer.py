@@ -36,4 +36,4 @@ def test_publication_renderer_uses_skeletal_rdkit_svg_not_atom_nodes():
     assert "bond-0" in svg
     assert "atom-0" in svg
     assert "<circle" not in svg
-    assert "fill="white"" in svg
+    assert 'fill="white"' in svg
