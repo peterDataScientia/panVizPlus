@@ -1,0 +1,69 @@
+metadata:
+  id: permissive_screening_2026_1
+  display_name: Permissive screening 2026.1
+  version: 2026.1
+  status: research_profile
+  exact_biovia_reproduction: false
+  exact_external_tool_reproduction: false
+  profile_basis: >-
+    A panVizPlus research profile using comparatively permissive geometric
+    screening for supported interaction classes. It is intended for exploratory
+    review and must be interpreted with per-criterion audit information.
+  units:
+    distance: angstrom
+    angle: degree
+
+interactions:
+  conventional_hbond:
+    status: research_profile
+    chemistry: {from_site: hydrogen_donor, to_site: hydrogen_acceptor}
+    geometry:
+      donor_acceptor_distance_max: 4.1
+      dha_angle_min: 100.0
+      hay_angle_min: 90.0
+      xda_angle_min: 100.0
+      day_angle_min: 90.0
+    confidence: exploratory_profile
+  hydrophobic_contact:
+    status: research_profile
+    chemistry: {ligand_elements: [C, S], protein_sidechain_template: true}
+    geometry: {atom_distance_max: 4.0}
+    confidence: exploratory_profile
+  salt_bridge:
+    status: research_profile
+    chemistry: {opposite_charge_required: true}
+    geometry: {charge_center_distance_max: 5.5}
+    confidence: exploratory_profile
+  pi_pi:
+    status: research_profile
+    chemistry: {two_planar_ring_systems_required: true}
+    common_geometry: {center_distance_max: 5.5, closest_atom_distance_max: 4.5}
+    stacked: {plane_angle_max: 30.0}
+    t_shaped: {plane_angle_min: 60.0}
+    confidence: exploratory_profile
+  pi_cation:
+    status: research_profile
+    chemistry: {pi_system_required: true, positive_site_required: true}
+    geometry: {center_distance_max: 6.0}
+    confidence: exploratory_profile
+  halogen_bond:
+    status: research_profile
+    chemistry: {ligand_halogen: [Cl, Br, I], acceptor_elements: [N, O, S]}
+    geometry: {vdw_sum_scale_max: 1.0, C_X_A_angle_min: 150.0}
+    confidence: exploratory_profile
+  metal_coordination:
+    status: research_profile
+    chemistry: {ligand_donor_elements: [N, O, S], protein_donor_elements: [N, O, S]}
+    geometry: {distance_max: 3.0}
+    confidence: exploratory_profile
+  water_bridge:
+    status: research_profile
+    chemistry: {water_oxygen_required: true, donor_acceptor_features_required: true}
+    geometry: {heavy_atom_distance_max: 4.1}
+    confidence: exploratory_profile
+  unfavorable_vdw_bump:
+    status: research_profile
+    geometry:
+      fraction_sum_vdw_radii_min: 0.70
+      interpretation: Atom pairs closer than this fraction of summed van der Waals radii are flagged.
+    confidence: moderate

@@ -20,19 +20,19 @@ def test_builtin_rule_profiles_are_versioned_and_distinct():
     ids = [p["profile_id"] for p in profiles]
     assert ids == [
         "panvizplus_v1",
-        "plip_style_2026_1",
+        "permissive_screening_2026_1",
         "prolif_style_2026_1",
     ]
 
     consensus = load_ruleset(profile="panvizplus_v1")
-    plip = load_ruleset(profile="plip_style_2026_1")
+    permissive = load_ruleset(profile="permissive_screening_2026_1")
     prolif = load_ruleset(profile="prolif_style_2026_1")
 
     assert consensus["metadata"]["display_name"] == "panVizPlus Consensus 2026.1"
-    assert plip["metadata"]["exact_external_tool_reproduction"] is False
+    assert permissive["metadata"]["exact_external_tool_reproduction"] is False
     assert prolif["metadata"]["exact_external_tool_reproduction"] is False
     assert (
-        plip["interactions"]["conventional_hbond"]["geometry"]["donor_acceptor_distance_max"]
+        permissive["interactions"]["conventional_hbond"]["geometry"]["donor_acceptor_distance_max"]
         != prolif["interactions"]["conventional_hbond"]["geometry"]["donor_acceptor_distance_max"]
     )
 

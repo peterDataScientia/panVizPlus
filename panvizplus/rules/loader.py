@@ -11,7 +11,7 @@ _REQUIRED_METADATA = {"id", "version", "status", "exact_biovia_reproduction"}
 
 _RULESET_FILES = {
     "panvizplus_v1": "panvizplus_v1.yaml",
-    "plip_style_2026_1": "plip_style_2026_1.yaml",
+    "permissive_screening_2026_1": "permissive_screening_2026_1.yaml",
     "prolif_style_2026_1": "prolif_style_2026_1.yaml",
 }
 
