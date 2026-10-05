@@ -96,7 +96,7 @@ def analyze_structure(
 
 def _detect_hydrophobic(structure, ligand_name, rules):
     cutoff = float(rules["interactions"]["hydrophobic_contact"]["geometry"]["atom_distance_max"])
-    ligand = [a for a in structure.ligand_atoms(ligand_name) if a.element.upper() in {"C", "S"}]
+    ligand = _ligand_hydrophobic_atoms(structure, ligand_name)
     protein = [
         a for a in structure.protein_atoms()
         if a.name.upper() in PROTEIN_HYDROPHOBIC_ATOMS.get(a.residue_name.upper(), set())
@@ -247,9 +247,12 @@ def _detect_halogen_bonds(structure, ligand_name, rules):
     distance_scale = float(rule["geometry"]["vdw_sum_scale_max"])
     angle_min = float(rule["geometry"]["C_X_A_angle_min"])
     ligand = structure.ligand_atoms(ligand_name)
+    protein_features, _ = perceive_hbond_features(structure, ligand_name)
+    amap = structure.atom_map()
     acceptors = [
-        a for a in structure.protein_atoms()
-        if a.element.upper() in {"O", "N", "S"}
+        amap[f.atom_id]
+        for f in protein_features
+        if f.kind == "hydrogen_acceptor" and f.atom_id in amap
     ]
     out = []
     for x in ligand:
@@ -368,6 +371,28 @@ def _detect_unfavorable_bumps(structure, ligand_name, rules):
         ))
     return out
 
+
+
+def _ligand_hydrophobic_atoms(structure, ligand_name):
+    """Conservative PDB-connectivity hydrophobe perception.
+
+    Carbon is treated as hydrophobic only when it has no directly bonded
+    N/O/S/P neighbor. Sulfur is accepted only when neutral and carbon-bound.
+    This intentionally favors specificity over sensitivity for PDB-only input.
+    """
+    out = []
+    for atom in structure.ligand_atoms(ligand_name):
+        element = atom.element.upper()
+        if (atom.formal_charge or 0) != 0:
+            continue
+        heavy = [n for n in structure.neighbors(atom.atom_id) if not n.is_hydrogen]
+        if element == "C":
+            if not any(n.element.upper() in {"N", "O", "S", "P"} for n in heavy):
+                out.append(atom)
+        elif element == "S":
+            if heavy and all(n.element.upper() == "C" for n in heavy):
+                out.append(atom)
+    return out
 
 def _ligand_charge_sites(structure, ligand_name):
     atoms = structure.ligand_atoms(ligand_name)

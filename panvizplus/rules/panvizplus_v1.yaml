@@ -4,8 +4,8 @@ metadata:
   status: alpha
   exact_biovia_reproduction: false
   scientific_position: >
-    Native panVizPlus interaction rules. The engine is independent of PLIP and
-    does not claim exact reproduction of proprietary BIOVIA implementations.
+    Native panVizPlus interaction rules. The engine uses explicit, inspectable
+    criteria and does not claim exact reproduction of proprietary implementations.
     Each interaction class exposes explicit chemical and geometric criteria.
   units:
     distance: angstrom

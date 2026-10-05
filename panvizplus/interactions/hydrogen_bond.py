@@ -168,6 +168,8 @@ def audit_conventional_hbonds(
                 residue_name=protein_atom.residue_name,
                 residue_number=protein_atom.residue_number,
                 chain_id=protein_atom.chain_id or None,
+                detector="panVizPlus-native",
+                detector_version=str(ruleset["metadata"]["version"]),
                 ruleset=ruleset["metadata"]["id"],
                 criteria=criteria,
                 measurements=measurements,
