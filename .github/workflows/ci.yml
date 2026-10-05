@@ -18,4 +18,6 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pip install -e ".[dev]"
       - run: python -m compileall -q app.py panvizplus utils.py interactive_engine.py scientific_records.py
+      - run: python -c "from openbabel import pybel; print('OpenBabel Python bindings OK')"
+      - run: which obabel && obabel -V
       - run: pytest -q
