@@ -1,0 +1,115 @@
+metadata:
+  id: panvizplus_v1
+  version: 0.1.0-draft
+  status: draft
+  exact_biovia_reproduction: false
+  scientific_position: >
+    Open, auditable DS-compatible baseline informed by publicly described
+    interaction definitions and locally inspected Discovery Studio 2020 API/help
+    concepts. Values must be benchmarked before a stable release.
+  units:
+    distance: angstrom
+    angle: degree
+
+interactions:
+  conventional_hbond:
+    status: provisional
+    chemistry:
+      from_site: hydrogen_donor
+      to_site: hydrogen_acceptor
+    geometry:
+      donor_acceptor_distance_max: 3.4
+      explicit_hydrogen_geometry:
+        DHA: required_when_hydrogen_present
+        HAY: supported
+      missing_hydrogen_geometry:
+        XDA: supported
+        DAY: supported
+    confidence: high_for_architecture_moderate_for_modern_exact_default
+
+  carbon_hbond:
+    status: provisional
+    chemistry:
+      donor_class: aromatic_or_acetylene_CH
+      to_site: hydrogen_acceptor
+    geometry:
+      donor_acceptor_distance_max: 3.8
+    confidence: moderate
+
+  attractive_charge:
+    status: provisional
+    chemistry:
+      opposite_charge_required: true
+    geometry:
+      site_distance_max: 5.6
+    confidence: moderate
+
+  pi_cation:
+    status: provisional
+    chemistry:
+      pi_system_required: true
+      positive_site_required: true
+    geometry:
+      center_distance_max: 5.0
+    confidence: moderate
+
+  pi_pi:
+    status: provisional
+    chemistry:
+      two_pi_systems_required: true
+    common_geometry:
+      center_distance_max: 6.0
+      closest_atom_distance_max: 4.5
+    stacked:
+      theta_max: 50.0
+      gamma_max: 35.0
+    t_shaped:
+      theta_max: 30.0
+      gamma_min: 55.0
+    confidence: moderate_to_high
+
+  alkyl:
+    status: provisional
+    chemistry:
+      hydrophobic_groups_required: true
+    geometry:
+      centroid_distance_max: 5.5
+    confidence: moderate
+
+  pi_alkyl:
+    status: provisional
+    chemistry:
+      pi_system_required: true
+      hydrophobic_group_required: true
+    geometry:
+      centroid_distance_max: 5.5
+    confidence: moderate
+
+  unfavorable_vdw_bump:
+    status: provisional
+    geometry:
+      fraction_sum_vdw_radii_min: 0.70
+      interpretation: >
+        Atom pairs closer than this fraction of the sum of van der Waals radii
+        are candidates for an unfavorable bump.
+    confidence: moderate
+
+references:
+  - id: biovia_ds2020_local_help
+    kind: locally_inspected_vendor_help
+    note: >
+      Discovery Studio 2020 Help/API exposed Mdm::NonbondType,
+      Mdm::NonbondCriterionType, donor/acceptor/pi/charge site properties,
+      explicit-H and missing-H hydrogen-bond geometry, and configurable criteria.
+  - id: biovia_2025_release
+    kind: vendor_release_notes
+    url: https://www.3ds.com/support/documentation/resource-library/t101-2024-notification-regarding-biovia-discovery-studio-2025
+    note: >
+      Modern release direction emphasizes correct ligand bond orders/formal
+      charges and mmCIF/CCD chemistry before interaction analysis.
+  - id: biovia_2026_release
+    kind: vendor_release_notes
+    url: https://www.3ds.com/support/documentation/resource-library/t62-2025-discovery-studio-2026
+    note: >
+      Used only to track documented modern platform changes; this ruleset does
+      not claim exact Discovery Studio 2026 numerical equivalence.
