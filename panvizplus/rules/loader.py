@@ -1,5 +1,3 @@
-"""Load and minimally validate a panVizPlus interaction ruleset."""
-
 from __future__ import annotations
 
 from importlib.resources import files
@@ -13,12 +11,13 @@ _REQUIRED_METADATA = {"id", "version", "status", "exact_biovia_reproduction"}
 
 
 def load_ruleset(path: str | Path | None = None) -> dict[str, Any]:
-    """Load a YAML ruleset and validate the minimum provenance metadata."""
     if path is None:
-        path = files("panvizplus.rules").joinpath("panvizplus_v1.yaml")
-
-    with Path(path).open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
+        resource = files("panvizplus.rules").joinpath("panvizplus_v1.yaml")
+        with resource.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    else:
+        with Path(path).open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
 
     if not isinstance(data, dict):
         raise ValueError("Ruleset root must be a mapping.")

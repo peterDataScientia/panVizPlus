@@ -1,6 +1,6 @@
 metadata:
   id: panvizplus_v1
-  version: 0.1.0-draft
+  version: 0.1.1-draft
   status: draft
   exact_biovia_reproduction: false
   scientific_position: >
@@ -19,13 +19,20 @@ interactions:
       to_site: hydrogen_acceptor
     geometry:
       donor_acceptor_distance_max: 3.4
+      dha_angle_min: 90.0
+      hay_angle_min: 90.0
+      xda_angle_min: 90.0
+      day_angle_min: 90.0
       explicit_hydrogen_geometry:
         DHA: required_when_hydrogen_present
-        HAY: supported
+        HAY: used_when_acceptor_neighbor_is_available
       missing_hydrogen_geometry:
-        XDA: supported
-        DAY: supported
-    confidence: high_for_architecture_moderate_for_modern_exact_default
+        XDA: used_when_donor_neighbor_is_available
+        DAY: used_when_acceptor_neighbor_is_available
+    confidence: architecture_high_numeric_modern_default_provisional
+    note: >
+      D-A distance and directional geometry are explicit research baselines.
+      The rule is not presented as an exact Discovery Studio 2026 default.
 
   carbon_hbond:
     status: provisional
@@ -104,12 +111,6 @@ references:
   - id: biovia_2025_release
     kind: vendor_release_notes
     url: https://www.3ds.com/support/documentation/resource-library/t101-2024-notification-regarding-biovia-discovery-studio-2025
-    note: >
-      Modern release direction emphasizes correct ligand bond orders/formal
-      charges and mmCIF/CCD chemistry before interaction analysis.
   - id: biovia_2026_release
     kind: vendor_release_notes
     url: https://www.3ds.com/support/documentation/resource-library/t62-2025-discovery-studio-2026
-    note: >
-      Used only to track documented modern platform changes; this ruleset does
-      not claim exact Discovery Studio 2026 numerical equivalence.
