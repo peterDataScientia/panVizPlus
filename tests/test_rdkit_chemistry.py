@@ -4,8 +4,8 @@ from panvizplus.chemistry.models import Atom, NormalizedStructure
 from panvizplus.chemistry.rdkit_layer import build_ligand_chemistry
 
 
-def atom(i, name, element, xyz):
-    return Atom(i, name, element, "LIG", 1, "Z", *xyz, "HETATM")
+def atom(i, name, element, xyz, charge=None):
+    return Atom(i, name, element, "LIG", 1, "Z", *xyz, "HETATM", formal_charge=charge)
 
 
 def test_rdkit_recognizes_aromatic_ring_from_connectivity():
@@ -25,7 +25,6 @@ def test_rdkit_recognizes_aromatic_ring_from_connectivity():
 
 
 def test_rdkit_amide_feature_perception():
-    # CH3-C(=O)-NH2 connectivity; bond order is intentionally not supplied.
     s = NormalizedStructure(
         atoms=[
             atom(1, "C1", "C", (-1.5, 0.0, 0.0)),
@@ -41,10 +40,18 @@ def test_rdkit_amide_feature_perception():
     assert 4 not in chemistry.acceptor_atom_ids
 
 
-def test_rdkit_preserves_explicit_formal_charge_site():
-    s = NormalizedStructure(
-        atoms=[Atom(1, "N1", "N", "LIG", 1, "Z", 0, 0, 0, "HETATM", formal_charge=1)]
+def test_rdkit_preserves_quaternary_ammonium_charge():
+    atoms = [
+        atom(1, "N1", "N", (0.0, 0.0, 0.0), charge=1),
+        atom(2, "C1", "C", (1.5, 0.0, 0.0)),
+        atom(3, "C2", "C", (-1.5, 0.0, 0.0)),
+        atom(4, "C3", "C", (0.0, 1.5, 0.0)),
+        atom(5, "C4", "C", (0.0, -1.5, 0.0)),
+    ]
+    chemistry = build_ligand_chemistry(
+        NormalizedStructure(atoms=atoms, bonds={(1,2),(1,3),(1,4),(1,5)}),
+        "LIG:Z:1",
+        net_charge=1,
     )
-    chemistry = build_ligand_chemistry(s, "LIG:Z:1", net_charge=1)
     assert chemistry.formal_charges[1] == 1
     assert 1 in chemistry.positive_atom_ids

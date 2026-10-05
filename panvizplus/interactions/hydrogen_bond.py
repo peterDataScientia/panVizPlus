@@ -7,6 +7,7 @@ from itertools import count
 
 from panvizplus.chemistry.features import ChemicalFeature, perceive_hbond_features
 from panvizplus.chemistry.models import Atom, NormalizedStructure
+from panvizplus.chemistry.rdkit_layer import LigandChemistry
 from panvizplus.interactions.geometry import angle_degrees, atom_distance
 from panvizplus.interactions.models import CriterionResult, InteractionRecord
 from panvizplus.rules import load_ruleset
@@ -23,6 +24,7 @@ def audit_conventional_hbonds(
     structure: NormalizedStructure,
     ligand_residue_name: str | None = None,
     ruleset: dict | None = None,
+    ligand_chemistry: LigandChemistry | None = None,
 ) -> list[InteractionRecord]:
     """Evaluate nearby donor/acceptor candidates and retain PASS/FAIL evidence.
 
@@ -44,7 +46,7 @@ def audit_conventional_hbonds(
     day_min = float(geometry.get("day_angle_min", 90.0))
 
     protein_features, ligand_features = perceive_hbond_features(
-        structure, ligand_residue_name
+        structure, ligand_residue_name, ligand_chemistry
     )
     p_donors = [f for f in protein_features if f.kind == "hydrogen_donor"]
     p_acceptors = [f for f in protein_features if f.kind == "hydrogen_acceptor"]
@@ -200,6 +202,7 @@ def detect_conventional_hbonds(
     structure: NormalizedStructure,
     ligand_residue_name: str | None = None,
     ruleset: dict | None = None,
+    ligand_chemistry: LigandChemistry | None = None,
 ) -> list[InteractionRecord]:
     """Return only candidates that pass every active H-bond criterion."""
     return [
@@ -208,6 +211,7 @@ def detect_conventional_hbonds(
             structure,
             ligand_residue_name=ligand_residue_name,
             ruleset=ruleset,
+            ligand_chemistry=ligand_chemistry,
         )
         if record.metadata.get("audit_status") == "accepted"
     ]
