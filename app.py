@@ -30,8 +30,6 @@ print("APPCHK 06 — utils import OK", flush=True)
 from interactive_engine import build_editor_scene
 from scientific_records import build_scientific_records, build_figure_records, write_scientific_exports
 from panviz_version import PANVIZ_VERSION, PANVIZ_RENDERER_REVISION
-from panvizplus.analysis import audit_pdb as panvizplus_audit_pdb
-from panvizplus.rules import load_ruleset
 print("APPCHK 07 — interactive_engine + v6 scientific data layer import OK", flush=True)
 
 print("APPCHK 08 — before set_page_config", flush=True)
@@ -354,57 +352,6 @@ def _write_project_manifest(result, manifest_path):
     Path(manifest_path).write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _panvizplus_core_dataframe(records):
-    rows = []
-    for record in records:
-        criterion_text = "; ".join(
-            f"{item.name}: {item.measured_value} {item.comparator} {item.threshold}"
-            + (f" {item.units}" if item.units else "")
-            + (" [PASS]" if item.passed else " [FAIL]")
-            for item in record.criteria
-        )
-        rows.append({
-            "Record ID": record.interaction_id,
-            "Interaction": record.interaction_type,
-            "Ligand site": record.ligand_site,
-            "Protein site": record.protein_site,
-            "Residue": f"{record.residue_name}{record.residue_number}:{record.chain_id or '-'}",
-            "Status": str(record.metadata.get("audit_status", "accepted")).upper(),
-            "D-A (Å)": record.measurements.get("donor_acceptor_distance"),
-            "Geometry mode": record.metadata.get("geometry_mode"),
-            "Failed criteria": ", ".join(record.metadata.get("rejection_reasons", [])) or "—",
-            "Criteria": criterion_text,
-            "Detector": record.detector,
-            "Detector version": record.detector_version,
-            "Ruleset": record.ruleset,
-            "Origin": record.origin,
-            "Ligand chemistry confidence": record.metadata.get("ligand_feature_confidence"),
-            "Ligand chemistry source": record.metadata.get("ligand_feature_source"),
-        })
-    return pd.DataFrame(rows)
-
-
-def _write_panvizplus_core_exports(records_df, warnings, output_dir):
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / "panVizPlus_native_interactions.csv"
-    json_path = output_dir / "panVizPlus_native_interactions.json"
-    warnings_path = output_dir / "panVizPlus_native_warnings.json"
-    records_df.to_csv(csv_path, index=False)
-    json_path.write_text(
-        records_df.to_json(orient="records", indent=2, force_ascii=False, double_precision=10),
-        encoding="utf-8",
-    )
-    warnings_path.write_text(
-        json.dumps({"warnings": list(warnings)}, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return {"csv": str(csv_path), "json": str(json_path), "warnings": str(warnings_path)}
-
-
-PANVIZPLUS_RULESET = load_ruleset()
-
-
 print("APPCHK 16 — before input section markdown", flush=True)
 st.markdown('<div class="panviz-section"><h4>1 · Input structure</h4>', unsafe_allow_html=True)
 print("APPCHK 17 — input section markdown OK", flush=True)
@@ -526,16 +473,6 @@ if analyze:
                 scientific_tables,
                 interaction_dir,
             )
-            core_records,core_warnings=panvizplus_audit_pdb(
-                analysis_obj["file_prot"],
-                selected_site.split(":")[0],
-            )
-            core_df=_panvizplus_core_dataframe(core_records)
-            core_exports=_write_panvizplus_core_exports(
-                core_df,
-                core_warnings,
-                site_dir/"panvizplus_native",
-            )
             scene,scene_root=build_editor_scene(
                 str(pdb_path),
                 selected_site,
@@ -569,11 +506,6 @@ if analyze:
                 "analysis_obj": analysis_obj,
                 "scientific_exports": scientific_exports,
                 "scientific_signature": scientific_exports["signature"],
-                "core_df": core_df,
-                "core_warnings": core_warnings,
-                "core_exports": core_exports,
-                "ruleset_id": PANVIZPLUS_RULESET["metadata"]["id"],
-                "ruleset_version": PANVIZPLUS_RULESET["metadata"]["version"],
             }
             inputs_dir=results_root/"inputs";inputs_dir.mkdir(parents=True,exist_ok=True)
             for name,data in source_payloads:
@@ -583,7 +515,7 @@ if analyze:
             project_readme.write_text(
                 f"# panVizPlus {PANVIZ_VERSION} project bundle\n\n"
                 "This package contains the original uploaded input file(s), the PLIP-prepared complex, "
-                "panVizPlus-native provenance records, canonical PLIP reference records, the initial editable layout, "
+                "canonical scientific interaction records, the initial editable layout, "
                 "and a machine-readable manifest. Presentation styling in panVizPlus does not modify the underlying "
                 "scientific interaction records. Native and PLIP records preserve detector provenance. Use the editor's **Save layout** and **Load layout** controls "
                 "to carry edited presentation state between sessions.\n",
@@ -629,37 +561,6 @@ with st.expander("Detected interaction table", expanded=False):
     else:
         st.dataframe(detected_df, use_container_width=True, hide_index=True)
     st.caption("These are the scientific records represented by the analysis backend; raw detector provenance is preserved in the exports.")
-
-with st.expander("Advanced · Experimental H-bond validator", expanded=False):
-    st.warning(
-        "Experimental validation layer. It does not replace the main interaction result set and its "
-        "draft cutoffs are not claimed to reproduce BIOVIA Discovery Studio exactly."
-    )
-    core_df=result.get("core_df", pd.DataFrame())
-    if core_df.empty:
-        st.info("No donor–acceptor H-bond candidates were found inside the 4.0 Å diagnostic screening radius.")
-    else:
-        accepted=int((core_df["Status"]=="ACCEPTED").sum()) if "Status" in core_df.columns else 0
-        rejected=int((core_df["Status"]=="REJECTED").sum()) if "Status" in core_df.columns else 0
-        c1,c2,c3=st.columns(3)
-        c1.metric("Candidates screened", int(len(core_df)))
-        c2.metric("Accepted", accepted)
-        c3.metric("Rejected", rejected)
-        st.dataframe(core_df, use_container_width=True, hide_index=True)
-    for warning in result.get("core_warnings", []):
-        st.caption(f"Chemistry note: {warning}")
-    st.caption(
-        f"Experimental ruleset: {result.get('ruleset_id', 'panvizplus_v1')} "
-        f"({result.get('ruleset_version', 'draft')}). Rejected rows are intentionally retained so the failed "
-        "distance/angle/geometry criterion can be inspected."
-    )
-    core_csv=Path(result["core_exports"]["csv"])
-    core_json=Path(result["core_exports"]["json"])
-    e1,e2=st.columns(2)
-    with e1:
-        st.download_button("Download experimental audit CSV", data=core_csv.read_bytes(), file_name=core_csv.name, mime="text/csv", use_container_width=True)
-    with e2:
-        st.download_button("Download experimental audit JSON", data=core_json.read_bytes(), file_name=core_json.name, mime="application/json", use_container_width=True)
 
 plip_csv=Path(result["scientific_exports"]["csv"])
 plip_json=Path(result["scientific_exports"]["json"])

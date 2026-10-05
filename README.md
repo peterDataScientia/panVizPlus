@@ -90,7 +90,6 @@ panVizPlus now includes a deployable Streamlit interface that reuses the proven 
 ### Current analysis layers
 
 - **Primary interaction analysis** — one user-facing result set covering hydrophobic contacts, hydrogen bonds, water bridges, salt bridges, pi-stacking, pi-cation, halogen bonds, and metal coordination, with detector provenance retained in project exports.
-- **Experimental H-bond validator** — an advanced diagnostic layer that retains nearby donor/acceptor candidates, measured geometry, PASS/FAIL criteria, rejection reasons, ruleset version, and chemistry-confidence metadata. It is not presented as a second competing result set.
 
 ### Supported inputs
 
@@ -113,10 +112,9 @@ The app provides:
 - interactive publication figure editor;
 - hidden-on-demand scientific evidence table;
 - interaction CSV and JSON;
-- experimental H-bond audit CSV/JSON with accepted and rejected candidates;
 - complete reproducibility project ZIP;
 - detector/ruleset provenance and warnings.
 
 ### Important scientific status
 
-Version `0.1.0-alpha` is a working research application. The main interface presents a single interaction result set; detector provenance remains available in the project records. The independent panVizPlus H-bond implementation remains explicitly experimental until its chemistry perception and thresholds are benchmarked sufficiently for promotion into the primary detector layer.
+Version `0.1.0-alpha` is a working research application. The production interface presents a single interaction result set and preserves detector provenance in the project records. Experimental detector development remains internal until its chemistry perception and thresholds are sufficiently benchmarked for production use.
