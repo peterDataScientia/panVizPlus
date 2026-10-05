@@ -14,11 +14,19 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from panviz_version import PANVIZ_VERSION
+from panvizplus.audit import build_analysis_audit, hbond_audit_rows
 from panvizplus.chemistry.pdb import read_pdb
 from panvizplus.chemistry.rdkit_layer import build_ligand_chemistry
 from panvizplus.interactions.engine import analyze_structure
 from panvizplus.rendering import render_interaction_svg
-from panvizplus.rules import load_ruleset
+from panvizplus.reproducibility import (
+    build_figure_caption,
+    build_manifest,
+    build_methods_text,
+    build_publication_bundle,
+    interaction_to_dict,
+)
+from panvizplus.rules import list_rulesets, load_ruleset
 
 
 st.set_page_config(page_title=f"panVizPlus {PANVIZ_VERSION}", page_icon="🧬", layout="wide")
@@ -202,19 +210,44 @@ def _records_frame(records) -> pd.DataFrame:
 
 
 def _custom_rules() -> dict:
-    rules = copy.deepcopy(load_ruleset())
+    profiles = list_rulesets()
+    profile_by_id = {p["profile_id"]: p for p in profiles}
+    profile_id = st.selectbox(
+        "Scientific rule profile",
+        list(profile_by_id),
+        format_func=lambda pid: profile_by_id[pid].get("display_name", pid),
+        help=(
+            "Profiles change explicit geometric screening criteria. External-tool-style "
+            "profiles are research profiles, not claims of exact reproduction."
+        ),
+    )
+    base = load_ruleset(profile=profile_id)
+    rules = copy.deepcopy(base)
+    original_interactions = json.dumps(rules["interactions"], sort_keys=True)
+
+    meta = rules["metadata"]
+    if meta.get("profile_basis"):
+        st.caption(meta["profile_basis"])
+
     with st.expander("Advanced scientific criteria", expanded=False):
-        st.caption("Defaults are versioned in the panVizPlus rule registry. Any change applies only to this analysis.")
+        st.caption(
+            "Every change is recorded as a custom profile derived from the selected "
+            "versioned rule set."
+        )
         rules["interactions"]["conventional_hbond"]["geometry"]["donor_acceptor_distance_max"] = st.number_input(
             "H-bond D···A maximum (Å)", 2.5, 4.5,
             float(rules["interactions"]["conventional_hbond"]["geometry"]["donor_acceptor_distance_max"]), 0.1
+        )
+        rules["interactions"]["conventional_hbond"]["geometry"]["dha_angle_min"] = st.number_input(
+            "H-bond D–H···A minimum angle (°)", 80.0, 180.0,
+            float(rules["interactions"]["conventional_hbond"]["geometry"]["dha_angle_min"]), 5.0
         )
         rules["interactions"]["hydrophobic_contact"]["geometry"]["atom_distance_max"] = st.number_input(
             "Hydrophobic atom distance maximum (Å)", 3.5, 6.0,
             float(rules["interactions"]["hydrophobic_contact"]["geometry"]["atom_distance_max"]), 0.1
         )
         rules["interactions"]["salt_bridge"]["geometry"]["charge_center_distance_max"] = st.number_input(
-            "Salt-bridge distance maximum (Å)", 3.0, 6.0,
+            "Salt-bridge distance maximum (Å)", 3.0, 6.5,
             float(rules["interactions"]["salt_bridge"]["geometry"]["charge_center_distance_max"]), 0.1
         )
         rules["interactions"]["pi_pi"]["common_geometry"]["center_distance_max"] = st.number_input(
@@ -237,6 +270,15 @@ def _custom_rules() -> dict:
             "Water-bridge heavy-atom maximum (Å)", 2.5, 4.5,
             float(rules["interactions"]["water_bridge"]["geometry"]["heavy_atom_distance_max"]), 0.1
         )
+
+    if json.dumps(rules["interactions"], sort_keys=True) != original_interactions:
+        base_id = str(base["metadata"]["id"])
+        rules["metadata"]["base_profile"] = base_id
+        rules["metadata"]["id"] = f"{base_id}:custom"
+        rules["metadata"]["display_name"] = (
+            f"{base['metadata'].get('display_name', base_id)} · Custom"
+        )
+        rules["metadata"]["status"] = "custom_analysis_profile"
     return rules
 
 
@@ -357,6 +399,42 @@ if run_analysis:
             int(fig_height),
             ligand_net_charge=int(ligand_net_charge),
         )
+        chemistry_info = {
+            "source": chemistry.source,
+            "reconstruction_mode": chemistry.reconstruction_mode,
+            "confidence": chemistry.confidence,
+            "donors": len(chemistry.donor_atom_ids),
+            "acceptors": len(chemistry.acceptor_atom_ids),
+            "positive_sites": len(chemistry.positive_atom_ids),
+            "negative_sites": len(chemistry.negative_atom_ids),
+            "hydrophobes": len(chemistry.hydrophobe_atom_ids),
+            "aromatic_rings": len(chemistry.aromatic_rings),
+            "net_charge": int(ligand_net_charge),
+        }
+        audit = build_analysis_audit(
+            structure,
+            ligand_selector,
+            records,
+            rules,
+            chemistry,
+        )
+        manifest = build_manifest(
+            input_sha256=source_signature,
+            ligand_selector=ligand_selector,
+            ligand_net_charge=int(ligand_net_charge),
+            chemistry=chemistry_info,
+            rules=rules,
+            interaction_count=len(records),
+            pose_score=pose_score,
+        )
+        bundle = build_publication_bundle(
+            svg=svg,
+            records=records,
+            manifest=manifest,
+            rules=rules,
+            audit=audit,
+        )
+
         st.session_state.native_result = {
             "key": result_key,
             "records": records,
@@ -364,20 +442,37 @@ if run_analysis:
             "svg": svg,
             "warnings": list(structure.warnings) + list(chemistry.warnings),
             "rules": rules,
-            "chemistry": {
-                "source": chemistry.source,
-                "reconstruction_mode": chemistry.reconstruction_mode,
-                "confidence": chemistry.confidence,
-                "donors": len(chemistry.donor_atom_ids),
-                "acceptors": len(chemistry.acceptor_atom_ids),
-                "positive_sites": len(chemistry.positive_atom_ids),
-                "negative_sites": len(chemistry.negative_atom_ids),
-                "hydrophobes": len(chemistry.hydrophobe_atom_ids),
-                "aromatic_rings": len(chemistry.aromatic_rings),
-                "net_charge": int(ligand_net_charge),
-            },
+            "chemistry": chemistry_info,
+            "audit": audit,
+            "manifest": manifest,
+            "bundle": bundle,
             "pose_score": pose_score,
         }
+
+        history = st.session_state.setdefault("analysis_history", [])
+        history_key = hashlib.sha256(repr(result_key).encode()).hexdigest()[:12]
+        if not any(item["id"] == history_key for item in history):
+            signatures = sorted({
+                (
+                    rec.interaction_type,
+                    f"{rec.residue_name}{rec.residue_number}:{rec.chain_id or '-'}",
+                    rec.ligand_site,
+                    rec.protein_site,
+                )
+                for rec in records
+            })
+            history.append({
+                "id": history_key,
+                "label": (
+                    f"{ligand_selector} · "
+                    f"{rules['metadata'].get('display_name', rules['metadata']['id'])} · "
+                    f"{len(records)} interactions"
+                ),
+                "signatures": signatures,
+                "chemistry": chemistry_info,
+                "ruleset": dict(rules["metadata"]),
+            })
+            st.session_state.analysis_history = history[-8:]
 
 result = st.session_state.get("native_result")
 if not result or result.get("key") != result_key:
@@ -386,88 +481,200 @@ if not result or result.get("key") != result_key:
 
 frame = result["frame"]
 records = result["records"]
+audit = result["audit"]
 types = frame["Interaction"].nunique() if not frame.empty else 0
 residues = frame["Residue"].nunique() if not frame.empty else 0
-unfavorable = int((frame["Interaction"] == "unfavorable_vdw_bump").sum()) if not frame.empty else 0
 
-st.markdown('<div class="card"><h4>3 · Native scientific summary</h4>', unsafe_allow_html=True)
+st.markdown('<div class="card"><h4>3 · Scientific summary</h4>', unsafe_allow_html=True)
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Interactions", len(records))
+m1.metric("Accepted interactions", len(records))
 m2.metric("Interaction classes", int(types))
 m3.metric("Interacting residues", int(residues))
-m4.metric("RDKit aromatic rings", int(result.get("chemistry", {}).get("aromatic_rings", 0)))
+m4.metric("Pocket residues ≤6.5 Å", int(audit.get("protein_residues_near_ligand", 0)))
 if result.get("pose_score") is not None:
     st.caption(f"Selected docking pose Vina score: {result['pose_score']:.2f} kcal/mol")
+st.caption(
+    f"Rule profile: {result['rules']['metadata'].get('display_name', result['rules']['metadata']['id'])} · "
+    f"Chemistry: {result['chemistry'].get('source')} · "
+    f"Confidence: {result['chemistry'].get('confidence')}"
+)
 for warning in result["warnings"]:
     st.warning(warning)
 st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown('<div class="card"><h4>4 · Native interaction diagram</h4>', unsafe_allow_html=True)
-components.html(result["svg"], height=int(fig_height) + 20, scrolling=True)
-st.markdown("</div>", unsafe_allow_html=True)
+analyze_tab, audit_tab, compare_tab, publish_tab = st.tabs(
+    ["Analyze", "Audit", "Compare", "Publish"]
+)
 
-st.markdown('<div class="card"><h4>5 · Scientific records</h4>', unsafe_allow_html=True)
-if frame.empty:
-    chemistry_mode = result.get("chemistry", {}).get("reconstruction_mode")
-    if chemistry_mode == "authoritative_chemistry_required":
-        st.error(
-            "Interaction analysis is incomplete because reliable ligand chemistry could not be "
-            "resolved. This is not evidence that the complex has no interactions. For named PDB "
-            "components panVizPlus attempts automatic wwPDB CCD chemistry; verify network access, "
-            "component identity, and ligand charge if CCD resolution fails."
+with analyze_tab:
+    st.markdown('<div class="card"><h4>Publication interaction diagram</h4>', unsafe_allow_html=True)
+    components.html(result["svg"], height=int(fig_height) + 20, scrolling=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="card"><h4>Accepted scientific records</h4>', unsafe_allow_html=True)
+    if frame.empty:
+        if result.get("chemistry", {}).get("reconstruction_mode") == "authoritative_chemistry_required":
+            st.warning(
+                "No interaction passed the selected rules. Ligand chemistry also required "
+                "a conservative PDB fallback, so inspect the Audit tab before interpreting "
+                "the zero count biologically."
+            )
+        else:
+            st.info(
+                "No interaction passed the selected rules. Open the Audit tab to inspect "
+                "screened H-bond candidates and rule-level rejection reasons."
+            )
+    else:
+        st.dataframe(frame, use_container_width=True, hide_index=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with audit_tab:
+    st.markdown("### Scientific audit")
+    st.caption(
+        "H-bonds currently have full candidate PASS/FAIL auditing. Other interaction "
+        "classes report accepted records plus chemistry and spatial-screening context; "
+        "they are not yet presented as full rejected-candidate audits."
+    )
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("Ligand heavy atoms", audit.get("ligand_heavy_atoms", 0))
+    a2.metric("Protein atoms ≤6.5 Å", audit.get("protein_heavy_atoms_near_ligand", 0))
+    a3.metric("H-bond candidates", audit.get("hbond_audit", {}).get("candidate_total", 0))
+    a4.metric("Rejected H-bonds", audit.get("hbond_audit", {}).get("rejected", 0))
+
+    st.markdown("#### Accepted interaction classes")
+    accepted_counts = audit.get("accepted_by_type", {})
+    if accepted_counts:
+        st.dataframe(
+            pd.DataFrame(
+                [{"Interaction": k, "Accepted": v} for k, v in accepted_counts.items()]
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
     else:
-        st.info("No interactions passed the currently selected panVizPlus rules.")
-else:
-    st.dataframe(frame, use_container_width=True, hide_index=True)
-st.markdown("</div>", unsafe_allow_html=True)
+        st.info("No accepted interaction classes.")
 
-with st.expander("Methodology and rule provenance", expanded=False):
-    st.write(
-        "RDKit supplies ligand chemistry perception (bond orders, aromaticity, formal charge, "
-        "donor/acceptor and related chemical features). panVizPlus applies the protein–ligand "
-        "interaction geometry and classification rules. RDKit is not used as an interaction detector."
+    st.markdown("#### Hydrogen-bond candidate audit")
+    hb_rows = hbond_audit_rows(audit)
+    if hb_rows:
+        hb_frame = pd.DataFrame(hb_rows)
+        status_filter = st.multiselect(
+            "Show H-bond candidate status",
+            ["accepted", "rejected"],
+            default=["accepted", "rejected"],
+        )
+        if status_filter:
+            hb_frame = hb_frame[hb_frame["Status"].isin(status_filter)]
+        st.dataframe(hb_frame, use_container_width=True, hide_index=True)
+        reasons = audit.get("hbond_audit", {}).get("rejection_reasons", {})
+        if reasons:
+            st.caption(
+                "Rejected by: "
+                + " · ".join(f"{name}: {count}" for name, count in reasons.items())
+            )
+    else:
+        st.info("No H-bond donor/acceptor candidate entered the diagnostic screening radius.")
+
+    if audit.get("fallback_sources"):
+        st.warning(
+            "Some accepted records used reduced-confidence chemistry fallbacks: "
+            + "; ".join(
+                f"{src} ({count})"
+                for src, count in audit["fallback_sources"].items()
+            )
+        )
+
+    with st.expander("Chemistry and audit provenance", expanded=False):
+        st.json(audit.get("chemistry", {}))
+        st.json(audit.get("audit_scope", {}))
+
+with compare_tab:
+    st.markdown("### Compare analyses")
+    history = st.session_state.get("analysis_history", [])
+    if len(history) < 2:
+        st.info(
+            "Run a second pose, ligand, charge state, or rule profile in this session. "
+            "panVizPlus will compare the two interaction fingerprints here."
+        )
+    else:
+        labels = [item["label"] for item in history]
+        left_col, right_col = st.columns(2)
+        with left_col:
+            idx_a = st.selectbox("Analysis A", range(len(history)), index=max(0, len(history)-2), format_func=lambda i: labels[i])
+        with right_col:
+            idx_b = st.selectbox("Analysis B", range(len(history)), index=len(history)-1, format_func=lambda i: labels[i], key="compare_b")
+        a = history[idx_a]
+        b = history[idx_b]
+        set_a = set(tuple(x) for x in a["signatures"])
+        set_b = set(tuple(x) for x in b["signatures"])
+        gained = sorted(set_b - set_a)
+        lost = sorted(set_a - set_b)
+        shared = sorted(set_a & set_b)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Shared", len(shared))
+        c2.metric("Gained in B", len(gained))
+        c3.metric("Lost from A", len(lost))
+        comparison_rows = (
+            [{"Change": "gained in B", "Interaction": x[0], "Residue": x[1], "Ligand site": x[2], "Protein site": x[3]} for x in gained]
+            + [{"Change": "lost from A", "Interaction": x[0], "Residue": x[1], "Ligand site": x[2], "Protein site": x[3]} for x in lost]
+        )
+        if comparison_rows:
+            st.dataframe(pd.DataFrame(comparison_rows), use_container_width=True, hide_index=True)
+        else:
+            st.success("The two analyses have the same interaction fingerprint.")
+
+with publish_tab:
+    st.markdown("### Publication and reproducibility")
+    methods_text = build_methods_text(result["manifest"])
+    caption_text = build_figure_caption(result["manifest"])
+
+    st.markdown("#### Methods text")
+    st.text_area("Methods", methods_text, height=150, label_visibility="collapsed")
+    st.markdown("#### Figure caption")
+    st.text_area("Caption", caption_text, height=120, label_visibility="collapsed")
+
+    with st.expander("Rule and chemistry provenance", expanded=False):
+        st.subheader("Ligand chemistry")
+        st.json(result.get("chemistry", {}))
+        st.subheader("Rule profile")
+        st.json(result["rules"]["metadata"])
+        st.subheader("Complete rules used")
+        st.json(result["rules"])
+
+    csv_bytes = frame.to_csv(index=False).encode("utf-8")
+    json_bytes = json.dumps(
+        [interaction_to_dict(r) for r in records],
+        indent=2,
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    d1, d2, d3, d4 = st.columns(4)
+    with d1:
+        st.download_button(
+            "Interactions CSV", csv_bytes, "panVizPlus_interactions.csv",
+            "text/csv", use_container_width=True
+        )
+    with d2:
+        st.download_button(
+            "Interactions JSON", json_bytes, "panVizPlus_interactions.json",
+            "application/json", use_container_width=True
+        )
+    with d3:
+        st.download_button(
+            "Publication SVG", result["svg"].encode("utf-8"),
+            "panVizPlus_interaction_diagram.svg", "image/svg+xml",
+            use_container_width=True
+        )
+    with d4:
+        st.download_button(
+            "Reproducibility bundle", result["bundle"],
+            "panVizPlus_publication_bundle.zip", "application/zip",
+            use_container_width=True
+        )
+
+    st.caption(
+        "Bundle contents: figure.svg · interactions.csv/json · analysis_manifest.json · "
+        "rules_used.yaml · audit_summary.json · methods.txt · figure_caption.txt"
     )
-    st.subheader("Ligand chemistry")
-    st.json(result.get("chemistry", {}))
-    st.subheader("Interaction rules")
-    st.json(result["rules"])
 
-csv_bytes = frame.to_csv(index=False).encode("utf-8")
-json_bytes = json.dumps(
-    [
-        {
-            "interaction_id": r.interaction_id,
-            "interaction_type": r.interaction_type,
-            "ligand_site": r.ligand_site,
-            "protein_site": r.protein_site,
-            "residue": f"{r.residue_name}{r.residue_number}:{r.chain_id or '-'}",
-            "measurements": r.measurements,
-            "criteria": [c.__dict__ if hasattr(c, "__dict__") else {
-                "name": c.name,
-                "measured_value": c.measured_value,
-                "comparator": c.comparator,
-                "threshold": c.threshold,
-                "units": c.units,
-                "passed": c.passed,
-            } for c in r.criteria],
-            "detector": r.detector,
-            "detector_version": r.detector_version,
-            "ruleset": r.ruleset,
-            "metadata": r.metadata,
-        }
-        for r in records
-    ],
-    indent=2,
-    ensure_ascii=False,
-).encode("utf-8")
-
-d1, d2, d3 = st.columns(3)
-with d1:
-    st.download_button("Download CSV", csv_bytes, "panVizPlus_interactions.csv", "text/csv", use_container_width=True)
-with d2:
-    st.download_button("Download JSON", json_bytes, "panVizPlus_interactions.json", "application/json", use_container_width=True)
-with d3:
-    st.download_button("Download SVG", result["svg"].encode("utf-8"), "panVizPlus_interaction_diagram.svg", "image/svg+xml", use_container_width=True)
-
-st.markdown(f'<div class="foot">panVizPlus {PANVIZ_VERSION} · native interaction engine</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="foot">panVizPlus {PANVIZ_VERSION} · native interaction engine · auditable rule profiles</div>', unsafe_allow_html=True)

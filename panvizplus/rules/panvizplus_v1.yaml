@@ -1,5 +1,6 @@
 metadata:
   id: panvizplus_v1
+  display_name: panVizPlus Consensus 2026.1
   version: 0.3.0-alpha
   status: alpha
   exact_biovia_reproduction: false

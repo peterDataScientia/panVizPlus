@@ -1,5 +1,5 @@
 """Versioned interaction-rule registry."""
 
-from .loader import load_ruleset
+from .loader import list_rulesets, load_ruleset
 
-__all__ = ["load_ruleset"]
+__all__ = ["load_ruleset", "list_rulesets"]

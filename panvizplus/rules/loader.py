@@ -9,16 +9,53 @@ import yaml
 
 _REQUIRED_METADATA = {"id", "version", "status", "exact_biovia_reproduction"}
 
+_RULESET_FILES = {
+    "panvizplus_v1": "panvizplus_v1.yaml",
+    "plip_style_2026_1": "plip_style_2026_1.yaml",
+    "prolif_style_2026_1": "prolif_style_2026_1.yaml",
+}
 
-def load_ruleset(path: str | Path | None = None) -> dict[str, Any]:
+
+def load_ruleset(
+    path: str | Path | None = None,
+    *,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    """Load and validate one versioned rule profile."""
+    if path is not None and profile is not None:
+        raise ValueError("Specify either path or profile, not both.")
+
     if path is None:
-        resource = files("panvizplus.rules").joinpath("panvizplus_v1.yaml")
+        selected = profile or "panvizplus_v1"
+        filename = _RULESET_FILES.get(selected)
+        if filename is None:
+            raise KeyError(
+                f"Unknown panVizPlus rule profile: {selected}. "
+                f"Available: {', '.join(sorted(_RULESET_FILES))}"
+            )
+        resource = files("panvizplus.rules").joinpath(filename)
         with resource.open("r", encoding="utf-8") as handle:
             data = yaml.safe_load(handle)
     else:
         with Path(path).open("r", encoding="utf-8") as handle:
             data = yaml.safe_load(handle)
 
+    _validate_ruleset(data)
+    return data
+
+
+def list_rulesets() -> list[dict[str, Any]]:
+    """Return metadata for built-in profiles in stable display order."""
+    out = []
+    for profile_id in _RULESET_FILES:
+        data = load_ruleset(profile=profile_id)
+        meta = dict(data["metadata"])
+        meta["profile_id"] = profile_id
+        out.append(meta)
+    return out
+
+
+def _validate_ruleset(data: Any) -> None:
     if not isinstance(data, dict):
         raise ValueError("Ruleset root must be a mapping.")
 
@@ -33,5 +70,3 @@ def load_ruleset(path: str | Path | None = None) -> dict[str, Any]:
     interactions = data.get("interactions")
     if not isinstance(interactions, dict) or not interactions:
         raise ValueError("Ruleset must contain at least one interaction definition.")
-
-    return data
