@@ -408,7 +408,16 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown('<div class="card"><h4>5 · Scientific records</h4>', unsafe_allow_html=True)
 if frame.empty:
-    st.info("No interactions passed the currently selected panVizPlus rules.")
+    chemistry_mode = result.get("chemistry", {}).get("reconstruction_mode")
+    if chemistry_mode == "authoritative_chemistry_required":
+        st.error(
+            "Interaction analysis is incomplete because reliable ligand chemistry could not be "
+            "resolved. This is not evidence that the complex has no interactions. For named PDB "
+            "components panVizPlus attempts automatic wwPDB CCD chemistry; verify network access, "
+            "component identity, and ligand charge if CCD resolution fails."
+        )
+    else:
+        st.info("No interactions passed the currently selected panVizPlus rules.")
 else:
     st.dataframe(frame, use_container_width=True, hide_index=True)
 st.markdown("</div>", unsafe_allow_html=True)

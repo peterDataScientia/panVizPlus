@@ -15,6 +15,7 @@ from rdkit import Chem, RDConfig
 from rdkit.Chem import ChemicalFeatures, rdDepictor, rdDetermineBonds
 from rdkit.Geometry import Point3D
 
+from .ccd import CCDTemplate, fetch_ccd_template, is_ccd_candidate
 from .models import Atom, NormalizedStructure, normalized_bond
 
 
@@ -52,6 +53,19 @@ def build_ligand_chemistry(
     atoms = structure.ligand_atoms(selector)
     if not atoms:
         raise ValueError(f"No ligand atoms found for {selector}.")
+
+    comp_id = str(selector).split(":", 1)[0].strip().upper()
+    if is_ccd_candidate(comp_id):
+        template = fetch_ccd_template(comp_id)
+        if template is not None:
+            chemistry = _build_from_ccd_template(
+                atoms,
+                selector,
+                template,
+                requested_net_charge=net_charge,
+            )
+            if chemistry is not None:
+                return chemistry
 
     atom_ids = {a.atom_id for a in atoms}
     ligand_bonds = {
@@ -119,6 +133,111 @@ def build_ligand_chemistry(
         _populate_graph_metadata(chemistry)
         return chemistry
 
+
+
+def _build_from_ccd_template(
+    atoms: list[Atom],
+    selector: str,
+    template: CCDTemplate,
+    requested_net_charge: int | None,
+) -> LigandChemistry | None:
+    """Build ligand chemistry from authoritative CCD atom names and bond orders."""
+    by_name = {a.name.strip(): a for a in atoms}
+    heavy_atoms = [a for a in atoms if not a.is_hydrogen]
+    if not heavy_atoms:
+        return None
+
+    matched_heavy = [
+        a for a in heavy_atoms
+        if a.name.strip() in template.atoms
+    ]
+    coverage = len(matched_heavy) / len(heavy_atoms)
+    if coverage < 0.90:
+        return None
+
+    rw = Chem.RWMol()
+    rd_idx_to_atom_id: dict[int, int] = {}
+    atom_id_to_rd_idx: dict[int, int] = {}
+    name_to_idx: dict[str, int] = {}
+
+    for atom in atoms:
+        ccd_atom = template.atoms.get(atom.name.strip())
+        rd_atom = Chem.Atom(atom.element.title())
+        if ccd_atom is not None:
+            rd_atom.SetFormalCharge(int(ccd_atom.charge))
+        elif atom.formal_charge is not None:
+            rd_atom.SetFormalCharge(int(atom.formal_charge))
+        idx = rw.AddAtom(rd_atom)
+        rd_idx_to_atom_id[idx] = atom.atom_id
+        atom_id_to_rd_idx[atom.atom_id] = idx
+        name_to_idx[atom.name.strip()] = idx
+
+    aromatic_atom_indices: set[int] = set()
+    for bond in template.bonds:
+        a = name_to_idx.get(bond.atom_id_1)
+        b = name_to_idx.get(bond.atom_id_2)
+        if a is None or b is None or a == b:
+            continue
+        bond_type = _ccd_bond_type(bond.order, bond.aromatic)
+        if rw.GetBondBetweenAtoms(a, b) is None:
+            rw.AddBond(a, b, bond_type)
+        if bond.aromatic:
+            aromatic_atom_indices.update({a, b})
+
+    for idx in aromatic_atom_indices:
+        rw.GetAtomWithIdx(idx).SetIsAromatic(True)
+
+    conf = Chem.Conformer(len(atoms))
+    atom_lookup = {a.atom_id: a for a in atoms}
+    for idx, atom_id in rd_idx_to_atom_id.items():
+        atom = atom_lookup[atom_id]
+        conf.SetAtomPosition(idx, Point3D(atom.x, atom.y, atom.z))
+    rw.AddConformer(conf, assignId=True)
+
+    mol = rw.GetMol()
+    try:
+        Chem.SanitizeMol(mol)
+    except Exception:
+        return None
+
+    ccd_charge = sum(
+        template.atoms[a.name.strip()].charge
+        for a in atoms
+        if a.name.strip() in template.atoms
+    )
+    warnings: list[str] = []
+    if requested_net_charge is not None and int(requested_net_charge) != int(ccd_charge):
+        warnings.append(
+            f"Selected ligand net charge ({int(requested_net_charge):+d}) differs from "
+            f"the wwPDB CCD formal charge ({int(ccd_charge):+d}) for {template.comp_id}. "
+            "CCD chemistry was used for this crystallographic component."
+        )
+
+    chemistry = LigandChemistry(
+        mol=mol,
+        selector=selector,
+        rd_idx_to_atom_id=rd_idx_to_atom_id,
+        atom_id_to_rd_idx=atom_id_to_rd_idx,
+        confidence="high",
+        source=f"wwPDB_CCD:{template.comp_id}+RDKit_BaseFeatures",
+        reconstruction_mode="wwPDB_CCD",
+        warnings=warnings,
+    )
+    _populate_features(chemistry)
+    return chemistry
+
+
+def _ccd_bond_type(order: str, aromatic: bool):
+    if aromatic or order.upper() == "AROM":
+        return Chem.BondType.AROMATIC
+    return {
+        "SING": Chem.BondType.SINGLE,
+        "SINGLE": Chem.BondType.SINGLE,
+        "DOUB": Chem.BondType.DOUBLE,
+        "DOUBLE": Chem.BondType.DOUBLE,
+        "TRIP": Chem.BondType.TRIPLE,
+        "TRIPLE": Chem.BondType.TRIPLE,
+    }.get(order.upper(), Chem.BondType.SINGLE)
 
 def _coordinate_mol(
     atoms: list[Atom],
