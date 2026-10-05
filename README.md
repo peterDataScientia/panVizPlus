@@ -81,3 +81,43 @@ See [docs/INTERACTION_SPECIFICATION.md](docs/INTERACTION_SPECIFICATION.md).
 ## Name
 
 Project name: **panVizPlus**.
+
+
+## Streamlit application
+
+panVizPlus now includes a deployable Streamlit interface that reuses the proven PanViz publication editor while keeping scientific detector provenance explicit.
+
+### Current analysis layers
+
+- **panVizPlus native** — conventional hydrogen-bond audit with measured geometry, rule version, pass/fail criteria, and chemistry-confidence metadata.
+- **PLIP reference backend** — hydrophobic contacts, hydrogen bonds, water bridges, salt bridges, pi-stacking, pi-cation, halogen bonds, and metal coordination used by the compatibility publication editor.
+- The two layers are stored separately; PLIP records are never relabeled as native panVizPlus detections.
+
+### Supported inputs
+
+- Complete protein-ligand **PDB complex**
+- Docking workflow with **PDB/PDBQT receptor + PDBQT ligand poses**
+
+### Deployment on Streamlit Community Cloud
+
+1. Choose repository `peterDataScientia/panVizPlus`.
+2. Select branch `main`.
+3. Set the main file to `app.py`.
+4. Deploy.
+
+The repository includes `requirements.txt`, `packages.txt`, `.python-version`, and `.streamlit/config.toml` for cloud deployment.
+
+### Evidence and exports
+
+The app provides:
+
+- interactive publication figure editor;
+- hidden-on-demand scientific evidence table;
+- panVizPlus-native CSV and JSON;
+- PLIP reference scientific records;
+- complete reproducibility project ZIP;
+- detector/ruleset provenance and warnings.
+
+### Important scientific status
+
+Version `0.1.0-alpha` is a working research application, not a claim that every interaction class has already been independently reimplemented by panVizPlus. The native engine is being expanded interaction-by-interaction behind the stable UI. The PLIP layer provides broader reference coverage during this transition.
