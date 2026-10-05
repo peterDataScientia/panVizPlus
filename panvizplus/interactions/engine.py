@@ -106,7 +106,15 @@ def analyze_structure(
 def _detect_hydrophobic(structure, ligand_name, rules, chemistry: LigandChemistry):
     cutoff = float(rules["interactions"]["hydrophobic_contact"]["geometry"]["atom_distance_max"])
     amap = structure.atom_map()
-    ligand = [amap[i] for i in chemistry.hydrophobe_atom_ids if i in amap]
+    if chemistry.reconstruction_mode == "authoritative_chemistry_required":
+        ligand = _ligand_hydrophobic_atoms(structure, ligand_name)
+        chem_confidence = "medium"
+        chem_source = "pdb_connectivity_hydrophobe_fallback"
+    else:
+        ligand = [amap[i] for i in chemistry.hydrophobe_atom_ids if i in amap]
+        chem_confidence = chemistry.confidence
+        chem_source = chemistry.source
+
     protein = [
         a for a in structure.protein_atoms()
         if a.name.upper() in PROTEIN_HYDROPHOBIC_ATOMS.get(a.residue_name.upper(), set())
@@ -119,14 +127,15 @@ def _detect_hydrophobic(structure, ligand_name, rules, chemistry: LigandChemistr
                 key = (pa.chain_id, pa.residue_number, pa.residue_name)
                 if key not in best or d < best[key][2]:
                     best[key] = (la, pa, d)
+
     out = []
     for i, (_, (la, pa, d)) in enumerate(best.items(), 1):
         out.append(_record(
             f"HYD-{i:04d}", "hydrophobic_contact", la, pa, rules,
             {"distance": round(d, 3)},
             [CriterionResult("atom_distance", round(d, 3), "<=", cutoff, "angstrom", True)],
-            chemistry_confidence=chemistry.confidence,
-            chemistry_source=chemistry.source,
+            chemistry_confidence=chem_confidence,
+            chemistry_source=chem_source,
         ))
     return out
 
@@ -134,12 +143,28 @@ def _detect_hydrophobic(structure, ligand_name, rules, chemistry: LigandChemistr
 def _detect_salt_bridges(structure, ligand_name, rules, chemistry: LigandChemistry):
     cutoff = float(rules["interactions"]["salt_bridge"]["geometry"]["charge_center_distance_max"])
     amap = structure.atom_map()
-    ligand_pos = [amap[i] for i in chemistry.positive_atom_ids if i in amap]
-    ligand_neg = [amap[i] for i in chemistry.negative_atom_ids if i in amap]
-    protein_pos = [a for a in structure.protein_atoms() if (a.residue_name.upper(), a.name.upper()) in PROTEIN_POSITIVE]
-    protein_neg = [a for a in structure.protein_atoms() if (a.residue_name.upper(), a.name.upper()) in PROTEIN_NEGATIVE]
+
+    if chemistry.reconstruction_mode == "authoritative_chemistry_required":
+        ligand_pos, ligand_neg = _ligand_charge_sites(structure, ligand_name)
+        chem_confidence = "low"
+        chem_source = "pdb_explicit_charge_or_connectivity_fallback"
+    else:
+        ligand_pos = [amap[i] for i in chemistry.positive_atom_ids if i in amap]
+        ligand_neg = [amap[i] for i in chemistry.negative_atom_ids if i in amap]
+        chem_confidence = chemistry.confidence
+        chem_source = chemistry.source
+
+    protein_pos = [
+        a for a in structure.protein_atoms()
+        if (a.residue_name.upper(), a.name.upper()) in PROTEIN_POSITIVE
+    ]
+    protein_neg = [
+        a for a in structure.protein_atoms()
+        if (a.residue_name.upper(), a.name.upper()) in PROTEIN_NEGATIVE
+    ]
     pairs = [(lp, pn) for lp in ligand_pos for pn in protein_neg]
     pairs += [(ln, pp) for ln in ligand_neg for pp in protein_pos]
+
     out = []
     for la, pa in pairs:
         d = _distance(la, pa)
@@ -148,22 +173,26 @@ def _detect_salt_bridges(structure, ligand_name, rules, chemistry: LigandChemist
                 f"SALT-{len(out)+1:04d}", "salt_bridge", la, pa, rules,
                 {"distance": round(d, 3)},
                 [CriterionResult("charge_center_distance", round(d, 3), "<=", cutoff, "angstrom", True)],
-                chemistry_confidence=chemistry.confidence,
-                chemistry_source=chemistry.source,
+                chemistry_confidence=chem_confidence,
+                chemistry_source=chem_source,
             ))
     return _dedup_residue_type(out)
 
 
 def _detect_pi_interactions(structure, ligand_name, rules, chemistry: LigandChemistry):
-    ligand_rings = [
-        RingFeature(
-            tuple(ring),
-            f"{ligand_name}:aromatic_ring{idx}",
-            chemistry.source,
-            chemistry.confidence,
-        )
-        for idx, ring in enumerate(chemistry.aromatic_rings, 1)
-    ]
+    if chemistry.reconstruction_mode == "authoritative_chemistry_required":
+        ligand_rings = _ligand_rings(structure, ligand_name)
+    else:
+        ligand_rings = [
+            RingFeature(
+                tuple(ring),
+                f"{ligand_name}:aromatic_ring{idx}",
+                chemistry.source,
+                chemistry.confidence,
+            )
+            for idx, ring in enumerate(chemistry.aromatic_rings, 1)
+        ]
+
     protein_rings = _protein_rings(structure)
     out: list[InteractionRecord] = []
     pp = rules["interactions"]["pi_pi"]
@@ -184,22 +213,25 @@ def _detect_pi_interactions(structure, ligand_name, rules, chemistry: LigandChem
             center = _vec_distance(lc, pc)
             if center > center_max:
                 continue
-            closest = min(_distance(amap[i], amap[j]) for i in lr.atom_ids for j in pr.atom_ids)
+            closest = min(
+                _distance(amap[i], amap[j])
+                for i in lr.atom_ids
+                for j in pr.atom_ids
+            )
             if closest > closest_max:
                 continue
             plane = _folded_angle(ln, pn)
             if plane <= stacked_plane_max:
                 itype = "pi_pi_stacked"
-                pass_angle = True
                 threshold = stacked_plane_max
                 comp = "<="
             elif plane >= tshape_plane_min:
                 itype = "pi_pi_t_shaped"
-                pass_angle = True
                 threshold = tshape_plane_min
                 comp = ">="
             else:
                 continue
+
             pa = amap[pr.atom_ids[0]]
             la = amap[lr.atom_ids[0]]
             out.append(_record(
@@ -214,7 +246,7 @@ def _detect_pi_interactions(structure, ligand_name, rules, chemistry: LigandChem
                 [
                     CriterionResult("centroid_distance", round(center, 3), "<=", center_max, "angstrom", True),
                     CriterionResult("closest_atom_distance", round(closest, 3), "<=", closest_max, "angstrom", True),
-                    CriterionResult("plane_angle", round(plane, 2), comp, threshold, "degree", pass_angle),
+                    CriterionResult("plane_angle", round(plane, 2), comp, threshold, "degree", True),
                 ],
                 ligand_site=lr.label,
                 protein_site=pr.label,
@@ -222,11 +254,21 @@ def _detect_pi_interactions(structure, ligand_name, rules, chemistry: LigandChem
                 chemistry_source=lr.source,
             ))
 
-    # pi-cation in either orientation
     pc_rule = rules["interactions"]["pi_cation"]
     cat_max = float(pc_rule["geometry"]["center_distance_max"])
-    ligand_pos = [amap[i] for i in chemistry.positive_atom_ids if i in amap]
-    protein_pos = [a for a in structure.protein_atoms() if (a.residue_name.upper(), a.name.upper()) in PROTEIN_POSITIVE]
+    if chemistry.reconstruction_mode == "authoritative_chemistry_required":
+        ligand_pos, _ = _ligand_charge_sites(structure, ligand_name)
+        ligand_pos_confidence = "low"
+        ligand_pos_source = "pdb_explicit_charge_or_connectivity_fallback"
+    else:
+        ligand_pos = [amap[i] for i in chemistry.positive_atom_ids if i in amap]
+        ligand_pos_confidence = chemistry.confidence
+        ligand_pos_source = chemistry.source
+
+    protein_pos = [
+        a for a in structure.protein_atoms()
+        if (a.residue_name.upper(), a.name.upper()) in PROTEIN_POSITIVE
+    ]
 
     for lr in ligand_rings:
         lc, _ = _ring_geometry([amap[x] for x in lr.atom_ids])
@@ -236,13 +278,15 @@ def _detect_pi_interactions(structure, ligand_name, rules, chemistry: LigandChem
             d = _point_distance(lc, pa.coord)
             if d <= cat_max:
                 out.append(_record(
-                    f"PICAT-{len(out)+1:04d}", "pi_cation", amap[lr.atom_ids[0]], pa, rules,
+                    f"PICAT-{len(out)+1:04d}", "pi_cation",
+                    amap[lr.atom_ids[0]], pa, rules,
                     {"center_distance": round(d, 3)},
                     [CriterionResult("center_distance", round(d, 3), "<=", cat_max, "angstrom", True)],
                     ligand_site=lr.label,
                     chemistry_confidence=lr.confidence,
                     chemistry_source=lr.source,
                 ))
+
     for la in ligand_pos:
         for pr in protein_rings:
             pc, _ = _ring_geometry([amap[x] for x in pr.atom_ids])
@@ -252,12 +296,13 @@ def _detect_pi_interactions(structure, ligand_name, rules, chemistry: LigandChem
             if d <= cat_max:
                 pa = amap[pr.atom_ids[0]]
                 out.append(_record(
-                    f"PICAT-{len(out)+1:04d}", "pi_cation", la, pa, rules,
+                    f"PICAT-{len(out)+1:04d}", "pi_cation",
+                    la, pa, rules,
                     {"center_distance": round(d, 3)},
                     [CriterionResult("center_distance", round(d, 3), "<=", cat_max, "angstrom", True)],
                     protein_site=pr.label,
-                    chemistry_confidence=chemistry.confidence,
-                    chemistry_source=chemistry.source,
+                    chemistry_confidence=ligand_pos_confidence,
+                    chemistry_source=ligand_pos_source,
                 ))
     return _dedup_residue_type(out)
 
@@ -307,31 +352,55 @@ def _detect_metal_coordination(structure, ligand_name, rules, chemistry: LigandC
     cutoff = float(rules["interactions"]["metal_coordination"]["geometry"]["distance_max"])
     amap = structure.atom_map()
     ligand_site_ids = chemistry.acceptor_atom_ids | chemistry.negative_atom_ids
-    ligand_hetero = [
-        amap[i] for i in ligand_site_ids
-        if i in amap and amap[i].element.upper() in {"N", "O", "S"}
+
+    if chemistry.reconstruction_mode == "authoritative_chemistry_required":
+        ligand_hetero = [
+            a for a in structure.ligand_atoms(ligand_name)
+            if not a.is_hydrogen and a.element.upper() in {"N", "O", "S"}
+        ]
+        chem_confidence = "low"
+        chem_source = "pdb_heteroatom_metal_fallback"
+    else:
+        ligand_hetero = [
+            amap[i] for i in ligand_site_ids
+            if i in amap and amap[i].element.upper() in {"N", "O", "S"}
+        ]
+        chem_confidence = chemistry.confidence
+        chem_source = chemistry.source
+
+    protein_hetero = [
+        a for a in structure.protein_atoms()
+        if a.element.upper() in {"N", "O", "S"}
     ]
-    protein_hetero = [a for a in structure.protein_atoms() if a.element.upper() in {"N", "O", "S"}]
     metals = [a for a in structure.atoms if a.element.upper() in METALS]
     out = []
-    for metal in metals:
-        ligand_hits = [(a, _distance(a, metal)) for a in ligand_hetero if _distance(a, metal) <= cutoff]
-        protein_hits = [(a, _distance(a, metal)) for a in protein_hetero if _distance(a, metal) <= cutoff]
+    for metal_atom in metals:
+        ligand_hits = [
+            (a, _distance(a, metal_atom))
+            for a in ligand_hetero
+            if _distance(a, metal_atom) <= cutoff
+        ]
+        protein_hits = [
+            (a, _distance(a, metal_atom))
+            for a in protein_hetero
+            if _distance(a, metal_atom) <= cutoff
+        ]
         for la, ld in ligand_hits:
             for pa, pd in protein_hits:
                 out.append(_record(
-                    f"METAL-{len(out)+1:04d}", "metal_coordination", la, pa, rules,
+                    f"METAL-{len(out)+1:04d}", "metal_coordination",
+                    la, pa, rules,
                     {
                         "ligand_metal_distance": round(ld, 3),
                         "protein_metal_distance": round(pd, 3),
-                        "metal": f"{metal.element}{metal.atom_id}",
+                        "metal": f"{metal_atom.element}{metal_atom.atom_id}",
                     },
                     [
                         CriterionResult("ligand_metal_distance", round(ld, 3), "<=", cutoff, "angstrom", True),
                         CriterionResult("protein_metal_distance", round(pd, 3), "<=", cutoff, "angstrom", True),
                     ],
-                    chemistry_confidence="high",
-                    chemistry_source="element_identity_and_distance",
+                    chemistry_confidence=chem_confidence,
+                    chemistry_source=chem_source,
                 ))
     return _dedup_residue_type(out)
 

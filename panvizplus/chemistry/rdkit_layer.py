@@ -125,9 +125,10 @@ def build_ligand_chemistry(
             reconstruction_mode="authoritative_chemistry_required",
             warnings=[
                 "RDKit could not assign a chemically valid bond-order model from this PDB "
-                f"({type(exc).__name__}). Interaction classes that require reliable ligand "
-                "donor/acceptor, charge, or aromaticity perception are withheld. "
-                "Use the correct ligand net charge and provide CCD/SDF/MOL2 chemistry."
+                f"({type(exc).__name__}). panVizPlus will continue with conservative PDB "
+                "connectivity/geometry fallbacks for supported interaction classes and mark "
+                "those records with reduced chemistry confidence. Provide CCD/SDF/MOL2 "
+                "chemistry for authoritative bond orders, aromaticity and protonation."
             ],
         )
         _populate_graph_metadata(chemistry)

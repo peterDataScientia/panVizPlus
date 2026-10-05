@@ -91,9 +91,17 @@ def perceive_hbond_features(
                 tuple(h.atom_id for h in _attached_hydrogens(structure, atom)),
                 tuple(n.atom_id for n in structure.neighbors(atom_id) if not n.is_hydrogen),
             ))
-        return protein_features, ligand_features
 
-    # Conservative fallback used only when RDKit chemistry is unavailable.
+        # A resolved RDKit/CCD graph is authoritative. An unresolved heavy-atom
+        # PDB graph, however, must not disable the detector: continue below to
+        # the conservative PDB feature fallback and mark its provenance.
+        if (
+            ligand_features
+            or ligand_chemistry.reconstruction_mode != "authoritative_chemistry_required"
+        ):
+            return protein_features, ligand_features
+
+    # Conservative fallback for unresolved PDB chemistry.
     for atom in structure.ligand_atoms(ligand_selector):
         if atom.is_hydrogen:
             continue
