@@ -89,9 +89,8 @@ panVizPlus now includes a deployable Streamlit interface that reuses the proven 
 
 ### Current analysis layers
 
-- **panVizPlus native** — conventional hydrogen-bond audit with measured geometry, rule version, pass/fail criteria, and chemistry-confidence metadata.
-- **PLIP reference backend** — hydrophobic contacts, hydrogen bonds, water bridges, salt bridges, pi-stacking, pi-cation, halogen bonds, and metal coordination used by the compatibility publication editor.
-- The two layers are stored separately; PLIP records are never relabeled as native panVizPlus detections.
+- **Primary interaction analysis** — one user-facing result set covering hydrophobic contacts, hydrogen bonds, water bridges, salt bridges, pi-stacking, pi-cation, halogen bonds, and metal coordination, with detector provenance retained in project exports.
+- **Experimental H-bond validator** — an advanced diagnostic layer that retains nearby donor/acceptor candidates, measured geometry, PASS/FAIL criteria, rejection reasons, ruleset version, and chemistry-confidence metadata. It is not presented as a second competing result set.
 
 ### Supported inputs
 
@@ -113,11 +112,11 @@ The app provides:
 
 - interactive publication figure editor;
 - hidden-on-demand scientific evidence table;
-- panVizPlus-native CSV and JSON;
-- PLIP reference scientific records;
+- interaction CSV and JSON;
+- experimental H-bond audit CSV/JSON with accepted and rejected candidates;
 - complete reproducibility project ZIP;
 - detector/ruleset provenance and warnings.
 
 ### Important scientific status
 
-Version `0.1.0-alpha` is a working research application, not a claim that every interaction class has already been independently reimplemented by panVizPlus. The native engine is being expanded interaction-by-interaction behind the stable UI. The PLIP layer provides broader reference coverage during this transition.
+Version `0.1.0-alpha` is a working research application. The main interface presents a single interaction result set; detector provenance remains available in the project records. The independent panVizPlus H-bond implementation remains explicitly experimental until its chemistry perception and thresholds are benchmarked sufficiently for promotion into the primary detector layer.
