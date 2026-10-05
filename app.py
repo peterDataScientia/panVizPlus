@@ -63,9 +63,9 @@ div[data-testid="stFileUploader"]{border:1px dashed #b8c8de;border-radius:14px;b
 </style>
 """, unsafe_allow_html=True)
 print("APPCHK 11 — main CSS markdown OK", flush=True)
-print("APPCHK 12 — before PanViz header markdown", flush=True)
+print("APPCHK 12 — before panVizPlus header markdown", flush=True)
 st.markdown(f"""<div class="panviz-shell"><div class="panviz-brand"><div class="panviz-mark">🧬</div><div><div class="panviz-title">panVizPlus</div><div class="panviz-subtitle">Provenance-aware protein–ligand interaction analysis &amp; publication figure editor</div></div></div><div class="panviz-badges"><span class="panviz-badge">panVizPlus native audit</span><span class="panviz-badge">PLIP reference backend</span><span class="panviz-badge">Editable presentation layer</span><span class="panviz-badge">Molecular topology locked</span><span class="panviz-badge">v{PANVIZ_VERSION}</span></div></div>""", unsafe_allow_html=True)
-print("APPCHK 13 — PanViz header markdown OK", flush=True)
+print("APPCHK 13 — panVizPlus header markdown OK", flush=True)
 
 print("APPCHK 14 — before editor.html read", flush=True)
 EDITOR_HTML = (Path(__file__).with_name("editor.html")).read_text(encoding="utf-8")
@@ -183,7 +183,7 @@ def _safe_remove(path, attempts=20, delay=0.20):
 def _convert_with_obabel(input_path, output_path, input_format, selected_block=None):
     obabel = _find_obabel()
     if not obabel:
-        raise RuntimeError("Open Babel executable 'obabel' was not found. Install openbabel-wheel in the PanViz environment.")
+        raise RuntimeError("Open Babel executable 'obabel' was not found. Install openbabel-wheel in the panVizPlus environment.")
     source = Path(input_path)
     cleanup = None
     if selected_block is not None:
@@ -579,11 +579,11 @@ if analyze:
                 target.write_bytes(data)
             project_readme = results_root/"PROJECT_README.md"
             project_readme.write_text(
-                f"# PanViz {PANVIZ_VERSION} project bundle\n\n"
+                f"# panVizPlus {PANVIZ_VERSION} project bundle\n\n"
                 "This package contains the original uploaded input file(s), the PLIP-prepared complex, "
-                "canonical PLIP scientific records, the initial editable layout, "
-                "and a machine-readable manifest. Presentation styling in PanViz does not modify the underlying "
-                "PLIP scientific interaction records. Use the editor's **Save layout** and **Load layout** controls "
+                "panVizPlus-native provenance records, canonical PLIP reference records, the initial editable layout, "
+                "and a machine-readable manifest. Presentation styling in panVizPlus does not modify the underlying "
+                "scientific interaction records. Native and PLIP records preserve detector provenance. Use the editor's **Save layout** and **Load layout** controls "
                 "to carry edited presentation state between sessions.\n",
                 encoding="utf-8"
             )
@@ -593,12 +593,12 @@ if analyze:
             result["project_zip"]=str(zip_path)
             st.session_state.panviz_result=result
         except Exception as exc:
-            st.error(f"PanViz analysis failed: {exc}")
+            st.error(f"panVizPlus analysis failed: {exc}")
             st.stop()
 
 result=st.session_state.get("panviz_result")
 if not result or result.get("key")!=result_key:
-    st.info("Configure the analysis above, then click **Generate PanViz interaction diagram**. Generated results remain available until you change the input, pose, binding site, or canvas size.")
+    st.info("Configure the analysis above, then click **Analyze with panVizPlus**. Generated results remain available until you change the input, pose, binding site, or canvas size.")
     st.stop()
 
 st.markdown('<div class="panviz-section"><h4>3 · Scientific summary</h4>', unsafe_allow_html=True)
