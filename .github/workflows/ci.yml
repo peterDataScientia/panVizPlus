@@ -21,3 +21,17 @@ jobs:
       - run: python -c "from openbabel import pybel; print('OpenBabel Python bindings OK')"
       - run: which obabel && obabel -V
       - run: pytest -q
+      - name: Streamlit boot smoke test
+        run: |
+          streamlit run app.py --server.headless true --server.address 127.0.0.1 --server.port 8501 >/tmp/panvizplus-streamlit.log 2>&1 &
+          APP_PID=$!
+          trap 'kill $APP_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 25); do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null; then
+              echo "Streamlit health check passed"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/panvizplus-streamlit.log
+          exit 1
