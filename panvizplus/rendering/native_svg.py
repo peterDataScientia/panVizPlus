@@ -9,7 +9,6 @@ import re
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdDepictor
-from rdkit.Chem.Draw import rdMolDraw2D
 
 from panvizplus.chemistry.models import NormalizedStructure
 from panvizplus.chemistry.rdkit_layer import LigandChemistry, build_ligand_chemistry
@@ -184,12 +183,21 @@ def _publication_ligand_svg(
     width: int,
     height: int,
 ) -> tuple[str, dict[int, tuple[float, float]]]:
-    """Return publication-style skeletal SVG and RDKit-index draw coordinates."""
+    """Return publication-style skeletal SVG and RDKit-index draw coordinates.
+
+    rdMolDraw2D is loaded lazily because Streamlit Community Cloud may lack the
+    optional Xrender system library on a fresh worker. If the compiled drawing
+    backend is unavailable, panVizPlus still starts and emits a clean skeletal
+    vector fallback instead of crashing the whole application.
+    """
     mol = Chem.Mol(chemistry.mol)
     mol.UpdatePropertyCache(strict=False)
-
-    # Use a true 2D chemical layout. This replaces the previous black-node graph.
     rdDepictor.Compute2DCoords(mol, canonOrient=True)
+
+    try:
+        from rdkit.Chem.Draw import rdMolDraw2D
+    except ImportError:
+        return _skeletal_svg_fallback(mol, width, height)
 
     drawer = rdMolDraw2D.MolDraw2DSVG(width, height)
     opts = drawer.drawOptions()
@@ -202,8 +210,6 @@ def _publication_ligand_svg(
     opts.explicitMethyl = False
     opts.multipleBondOffset = 0.16
 
-    # PrepareAndDrawMolecule gives RDKit control over aromatic/double-bond
-    # placement, heteroatom labels, stereobonds, and canonical ring depiction.
     rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
 
     draw_coords: dict[int, tuple[float, float]] = {}
@@ -216,6 +222,112 @@ def _publication_ligand_svg(
     inner = _strip_outer_svg(svg)
     return inner, draw_coords
 
+
+def _skeletal_svg_fallback(
+    mol: Chem.Mol,
+    width: int,
+    height: int,
+) -> tuple[str, dict[int, tuple[float, float]]]:
+    """Dependency-safe vector fallback: no carbon nodes, no raster rendering."""
+    conf = mol.GetConformer()
+    raw = {
+        idx: (
+            float(conf.GetAtomPosition(idx).x),
+            float(conf.GetAtomPosition(idx).y),
+        )
+        for idx in range(mol.GetNumAtoms())
+    }
+    heavy = [idx for idx, atom in enumerate(mol.GetAtoms()) if atom.GetAtomicNum() != 1]
+    pts = np.asarray([raw[idx] for idx in heavy], dtype=float)
+    if pts.size == 0:
+        return "", {}
+
+    xmin, ymin = pts.min(axis=0)
+    xmax, ymax = pts.max(axis=0)
+    xr = max(float(xmax - xmin), 1.0)
+    yr = max(float(ymax - ymin), 1.0)
+    scale = min((width * 0.86) / xr, (height * 0.80) / yr)
+    mean = pts.mean(axis=0)
+
+    coords = {
+        idx: (
+            width / 2 + (raw[idx][0] - mean[0]) * scale,
+            height / 2 - (raw[idx][1] - mean[1]) * scale,
+        )
+        for idx in raw
+    }
+
+    parts: list[str] = []
+    for bond in mol.GetBonds():
+        a = bond.GetBeginAtomIdx()
+        b = bond.GetEndAtomIdx()
+        if mol.GetAtomWithIdx(a).GetAtomicNum() == 1 or mol.GetAtomWithIdx(b).GetAtomicNum() == 1:
+            continue
+        x1, y1 = coords[a]
+        x2, y2 = coords[b]
+        order = float(bond.GetBondTypeAsDouble())
+        parts.extend(_fallback_bond_svg(x1, y1, x2, y2, order))
+
+    element_colours = {
+        7: "#2457E6",
+        8: "#D33",
+        9: "#159947",
+        15: "#E87500",
+        16: "#C79A00",
+        17: "#159947",
+        35: "#8C4A2F",
+        53: "#6D4A8B",
+    }
+    for idx, atom in enumerate(mol.GetAtoms()):
+        if atom.GetAtomicNum() in {1, 6}:
+            continue
+        x, y = coords[idx]
+        symbol = atom.GetSymbol()
+        charge = atom.GetFormalCharge()
+        if charge > 0:
+            symbol += "+" if charge == 1 else f"{charge}+"
+        elif charge < 0:
+            symbol += "−" if charge == -1 else f"{abs(charge)}−"
+        colour = element_colours.get(atom.GetAtomicNum(), "#222")
+        parts.append(
+            f'<text x="{x:.1f}" y="{y+5:.1f}" text-anchor="middle" '
+            f'font-family="Arial,Helvetica,sans-serif" font-size="16" '
+            f'font-weight="700" fill="{colour}" stroke="white" stroke-width="3" '
+            f'paint-order="stroke">{escape(symbol)}</text>'
+        )
+
+    return "".join(parts), coords
+
+
+def _fallback_bond_svg(x1, y1, x2, y2, order):
+    dx, dy = x2 - x1, y2 - y1
+    length = max((dx * dx + dy * dy) ** 0.5, 1e-9)
+    ox, oy = -dy / length * 3.0, dx / length * 3.0
+
+    def line(ax, ay, bx, by, dash=""):
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+        return (
+            f'<line x1="{ax:.1f}" y1="{ay:.1f}" x2="{bx:.1f}" y2="{by:.1f}" '
+            f'stroke="#222" stroke-width="1.8" stroke-linecap="round"{dash_attr}/>'
+        )
+
+    if 1.35 <= order < 1.75:
+        return [
+            line(x1, y1, x2, y2),
+            line(x1 + ox, y1 + oy, x2 + ox, y2 + oy, "4 3"),
+        ]
+    if 1.75 <= order < 2.5:
+        return [
+            line(x1 + ox, y1 + oy, x2 + ox, y2 + oy),
+            line(x1 - ox, y1 - oy, x2 - ox, y2 - oy),
+        ]
+    if order >= 2.5:
+        return [
+            line(x1, y1, x2, y2),
+            line(x1 + ox * 1.5, y1 + oy * 1.5, x2 + ox * 1.5, y2 + oy * 1.5),
+            line(x1 - ox * 1.5, y1 - oy * 1.5, x2 - ox * 1.5, y2 - oy * 1.5),
+        ]
+    return [line(x1, y1, x2, y2)]
 
 def _strip_outer_svg(svg: str) -> str:
     start = re.search(r"<svg\b[^>]*>", svg, flags=re.I | re.S)

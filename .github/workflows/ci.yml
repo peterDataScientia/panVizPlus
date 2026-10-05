@@ -24,6 +24,7 @@ jobs:
           fi
       - run: python -m compileall -q app.py panvizplus
       - run: python -c "import rdkit; print('RDKit', rdkit.__version__)"
+      - run: python -c "from rdkit.Chem.Draw import rdMolDraw2D; print('rdMolDraw2D OK')"
       - run: which obabel && obabel -V
       - run: pytest -q
       - name: Streamlit boot smoke test
