@@ -72,24 +72,15 @@ def perceive_hbond_features(
         neighbor_ids = tuple(n.atom_id for n in heavy_neighbors)
         charge = atom.formal_charge or 0
 
-        donor = False
-        donor_source = "pdb_connectivity_inference"
-        donor_conf = "low"
-        if element in {"N", "O", "S"} and charge >= 0:
-            if hydrogen_ids:
-                donor = True
-                donor_source = "pdb_explicit_hydrogen"
-                donor_conf = "medium"
-            elif element == "O" and len(heavy_neighbors) == 1:
-                donor = True
-            elif element == "S" and len(heavy_neighbors) == 1:
-                donor = True
-            elif element == "N" and len(heavy_neighbors) <= 2:
-                donor = True
-        if donor:
+        # PDB connectivity alone cannot reliably distinguish, for example,
+        # hydroxyl O from carbonyl O. Therefore a ligand donor is confirmed only
+        # when an attached hydrogen is explicitly represented. Missing-H donor
+        # perception will be upgraded later from authoritative bond-order/
+        # protonation data rather than guessed from coordination number.
+        if element in {"N", "O", "S"} and hydrogen_ids and charge >= 0:
             ligand_features.append(ChemicalFeature(
-                atom.atom_id, "hydrogen_donor", donor_conf, donor_source,
-                hydrogen_ids, neighbor_ids,
+                atom.atom_id, "hydrogen_donor", "medium",
+                "pdb_explicit_hydrogen", hydrogen_ids, neighbor_ids,
             ))
 
         acceptor = False
