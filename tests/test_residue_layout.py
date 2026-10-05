@@ -54,10 +54,10 @@ def test_residue_layout_is_anchor_based_not_circular():
     assert right[0] > coords[2][0]
     assert top[1] < coords[3][1]
 
-    # A radial/circular layout would force all labels to approximately one
-    # radius. The anchor-based layout intentionally does not.
-    radii = [
-        ((x - center[0]) ** 2 + (y - center[1]) ** 2) ** 0.5
-        for x, y in (left, right, top)
-    ]
-    assert max(radii) - min(radii) > 10.0
+    # Placement is tied to the local interaction anchor, not to residue order.
+    def d(p, q):
+        return ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5
+
+    assert d(left, coords[1]) < d(left, coords[2])
+    assert d(right, coords[2]) < d(right, coords[1])
+    assert d(top, coords[3]) < d(top, coords[1])
