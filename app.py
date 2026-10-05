@@ -1,578 +1,411 @@
-print("APPCHK 00 — app.py process entered", flush=True)
-import os
-import shutil
-import tempfile
-import subprocess
-import re
-from pathlib import Path
-import json
+from __future__ import annotations
+
+import copy
 import hashlib
-import zipfile
-from datetime import datetime, timezone
-print("APPCHK 01 — stdlib imports OK", flush=True)
+import json
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
 import pandas as pd
-print("APPCHK 02 — pandas import OK", flush=True)
 import streamlit as st
-print("APPCHK 03 — streamlit import OK", flush=True)
 import streamlit.components.v1 as components
-print("APPCHK 04 — streamlit components import OK", flush=True)
 
-# Streamlit Cloud/Linux native-library load-order guard:
-# preload RDKit before PLIP/Open Babel to avoid an Open Babel -> RDKit segfault.
-from rdkit import Chem
-from rdkit.Chem import AllChem, rdDetermineBonds
-print("APPCHK 04R — RDKit preloaded before PLIP/Open Babel", flush=True)
+from panviz_version import PANVIZ_VERSION
+from panvizplus.chemistry.pdb import read_pdb
+from panvizplus.interactions.engine import analyze_structure
+from panvizplus.rendering import render_interaction_svg
+from panvizplus.rules import load_ruleset
 
-from plip.structure.preparation import PDBComplex
-print("APPCHK 05 — PLIP PDBComplex import OK", flush=True)
-from utils import plip_2d_interactions
-print("APPCHK 06 — utils import OK", flush=True)
-from interactive_engine import build_editor_scene
-from scientific_records import build_scientific_records, build_figure_records, write_scientific_exports
-from panviz_version import PANVIZ_VERSION, PANVIZ_RENDERER_REVISION
-print("APPCHK 07 — interactive_engine + v6 scientific data layer import OK", flush=True)
 
-print("APPCHK 08 — before set_page_config", flush=True)
-st.set_page_config(page_title=f"panVizPlus v{PANVIZ_VERSION}", page_icon="🧬", layout="wide", initial_sidebar_state="expanded")
-print("APPCHK 09 — set_page_config OK", flush=True)
-print("APPCHK 10 — before main CSS markdown", flush=True)
-st.markdown("""
+st.set_page_config(page_title=f"panVizPlus {PANVIZ_VERSION}", page_icon="🧬", layout="wide")
+st.markdown(
+    """
 <style>
-:root{--pv-navy:#143761;--pv-blue:#1f5aa6;--pv-ink:#16243a;--pv-muted:#65748b;--pv-line:#dce4ef}
-.block-container{padding-top:1.2rem;padding-bottom:2.2rem;max-width:1520px}
-.panviz-shell{border:1px solid #dbe3ee;border-radius:18px;padding:18px 20px 16px;background:linear-gradient(135deg,#f7faff 0%,#ffffff 52%,#f4f7fb 100%);box-shadow:0 8px 28px rgba(24,54,90,.07);margin-bottom:16px}
-.panviz-brand{display:flex;align-items:center;gap:12px}
-.panviz-mark{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;color:white;font-size:22px;font-weight:800;background:linear-gradient(135deg,#1d5da9,#143761);box-shadow:0 5px 14px rgba(20,55,97,.24)}
-.panviz-title{font-size:2.0rem;font-weight:800;letter-spacing:-.6px;color:var(--pv-ink);line-height:1.05}
-.panviz-subtitle{color:var(--pv-muted);font-size:.94rem;margin-top:3px}
-.panviz-badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
-.panviz-badge{font-size:.72rem;font-weight:700;color:#34506f;background:#eef4fb;border:1px solid #dce7f3;border-radius:999px;padding:5px 9px}
-.panviz-section{border:1px solid var(--pv-line);border-radius:14px;padding:12px 14px;background:#fff;box-shadow:0 4px 14px rgba(31,55,88,.05);margin:10px 0}
-.panviz-section h4{margin:0 0 8px;color:var(--pv-navy);font-size:13px}
-div[data-testid="stFileUploader"]{border:1px dashed #b8c8de;border-radius:14px;background:#fbfdff;padding:4px}
-.pdbqt-step{font-size:11px;font-weight:800;letter-spacing:.08em;color:#6d7d92;margin-bottom:4px}
-.pdbqt-card-title{font-size:14px;font-weight:800;color:#143761;letter-spacing:.02em}
-.pdbqt-card-desc{font-size:12px;color:#536579;margin-top:4px;line-height:1.45}
-.pdbqt-example{font-size:11px;color:#68788d;margin-top:8px;line-height:1.45}
-.pdbqt-example code{font-size:10.5px;background:#eef3f8;padding:2px 4px;border-radius:4px}
-.stButton>button{border-radius:9px;font-weight:700}
-.stDownloadButton>button{border-radius:9px}
-.panviz-foot{color:#7a8798;font-size:.73rem;margin-top:10px}
+:root{--navy:#143761;--ink:#16243a;--muted:#68788d;--line:#dce4ef}
+.block-container{padding-top:1.2rem;padding-bottom:2rem;max-width:1480px}
+.hero{border:1px solid #dbe3ee;border-radius:18px;padding:18px 20px;background:linear-gradient(135deg,#f7faff,#fff 55%,#f4f7fb);box-shadow:0 8px 28px rgba(24,54,90,.07);margin-bottom:14px}
+.title{font-size:2rem;font-weight:800;color:var(--ink);letter-spacing:-.5px}
+.sub{color:var(--muted);font-size:.95rem;margin-top:4px}
+.badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.badge{font-size:.72rem;font-weight:700;color:#34506f;background:#eef4fb;border:1px solid #dce7f3;border-radius:999px;padding:5px 9px}
+.card{border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:#fff;box-shadow:0 4px 14px rgba(31,55,88,.05);margin:10px 0}
+.card h4{margin:0 0 8px;color:var(--navy);font-size:13px}
+.foot{color:#7a8798;font-size:.74rem;margin-top:10px}
 </style>
-""", unsafe_allow_html=True)
-print("APPCHK 11 — main CSS markdown OK", flush=True)
-print("APPCHK 12 — before panVizPlus header markdown", flush=True)
-st.markdown(f"""<div class="panviz-shell"><div class="panviz-brand"><div class="panviz-mark">🧬</div><div><div class="panviz-title">panVizPlus</div><div class="panviz-subtitle">Provenance-aware protein–ligand interaction analysis &amp; publication figure editor</div></div></div><div class="panviz-badges"><span class="panviz-badge">Interaction analysis</span><span class="panviz-badge">Provenance-aware records</span><span class="panviz-badge">Editable presentation layer</span><span class="panviz-badge">Molecular topology locked</span><span class="panviz-badge">v{PANVIZ_VERSION}</span></div></div>""", unsafe_allow_html=True)
-print("APPCHK 13 — panVizPlus header markdown OK", flush=True)
+<div class="hero">
+  <div class="title">panVizPlus</div>
+  <div class="sub">Native protein–ligand interaction analysis with explicit, versioned scientific rules.</div>
+  <div class="badges">
+    <span class="badge">panVizPlus-native engine</span>
+    <span class="badge">Independent interaction engine</span>
+    <span class="badge">Rule provenance</span>
+    <span class="badge">PDB + PDBQT</span>
+    <span class="badge">v""" + PANVIZ_VERSION + """</span>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
-print("APPCHK 14 — before editor.html read", flush=True)
-EDITOR_HTML = (Path(__file__).with_name("editor.html")).read_text(encoding="utf-8")
-print(f"APPCHK 15 — editor.html read OK ({len(EDITOR_HTML)} chars)", flush=True)
 
-def render_editor(scene):
-    html = EDITOR_HTML.replace("__PANVIZ_SCENE__", json.dumps(scene, ensure_ascii=False))
+def _workspace() -> Path:
+    if "pv_native_root" not in st.session_state or not Path(st.session_state.pv_native_root).exists():
+        st.session_state.pv_native_root = tempfile.mkdtemp(prefix="panvizplus_")
+    return Path(st.session_state.pv_native_root)
 
-    # Let the embedded editor report its real rendered height to Streamlit.
-    # This prevents a large fixed iframe from leaving blank space below the
-    # editor and allows the scientific interaction table to follow immediately.
-    autosize_script = """
-    <script>
-    (() => {
-      let lastHeight = 0;
-      const reportHeight = () => {
-        const root = document.getElementById('pv-root');
-        if (!root) return;
-        const rect = root.getBoundingClientRect();
-        const height = Math.ceil(Math.max(
-          rect.bottom,
-          root.scrollHeight,
-          document.body.scrollHeight,
-          document.documentElement.scrollHeight
-        ) + 4);
-        if (Math.abs(height - lastHeight) < 2) return;
-        lastHeight = height;
-        window.parent.postMessage({
-          isStreamlitMessage: true,
-          type: 'streamlit:setFrameHeight',
-          height: height
-        }, '*');
-      };
 
-      window.addEventListener('load', () => {
-        reportHeight();
-        setTimeout(reportHeight, 100);
-        setTimeout(reportHeight, 400);
-      });
+def _find_obabel() -> str | None:
+    return shutil.which("obabel") or shutil.which("obabel.exe")
 
-      if ('ResizeObserver' in window) {
-        const observer = new ResizeObserver(reportHeight);
-        observer.observe(document.documentElement);
-        const root = document.getElementById('pv-root');
-        if (root) observer.observe(root);
-      }
 
-      if ('MutationObserver' in window) {
-        const root = document.getElementById('pv-root');
-        if (root) {
-          const mutationObserver = new MutationObserver(() => {
-            requestAnimationFrame(reportHeight);
-          });
-          mutationObserver.observe(root, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            characterData: true
-          });
-        }
-      }
-
-      window.addEventListener('resize', reportHeight);
-    })();
-    </script>
-    """
-    html = html + autosize_script
-
-    # A compact initial height is used only until the editor reports its
-    # measured height above.
-    canvas_h = int(scene.get("height", 850) or 850)
-    initial_h = max(640, min(1800, canvas_h + 120))
-    components.html(html, height=initial_h, scrolling=True)
-
-def _eligible_binding_sites(pdb_path):
-    mol = PDBComplex(); mol.load_pdb(str(pdb_path)); excluded={"ARN","ASH","GLH","LYN","HIE","HIP"}
-    return [x for x in str(mol).split("\n")[1:] if x.strip() and x.split(":")[0] not in excluded]
-
-def _find_obabel():
-    for name in ("obabel", "obabel.exe"):
-        path = shutil.which(name)
-        if path:
-            return path
-    return None
-
-def _extract_pdbqt_models(path):
-    text = Path(path).read_text(encoding="utf-8", errors="replace")
-    blocks = re.findall(r"MODEL\s+\d+.*?ENDMDL", text, flags=re.S|re.I)
-    if blocks:
-        return blocks
-    return [text]
-
-def _safe_remove(path, attempts=20, delay=0.20):
-    """Best-effort Windows-safe removal of a temporary file.
-
-    Antivirus/indexer/Open Babel child processes can briefly retain a handle
-    even after subprocess.run() returns. Cleanup must never convert a
-    successful PDBQT conversion into a fatal WinError 32.
-    """
-    if path is None:
-        return
-    target = Path(path)
-    for _ in range(max(1, attempts)):
-        try:
-            target.unlink(missing_ok=True)
-            return
-        except PermissionError:
-            import time
-            time.sleep(delay)
-        except OSError:
-            import time
-            time.sleep(delay)
-    # Leave the file in place rather than failing the scientific workflow.
-
-def _convert_with_obabel(input_path, output_path, input_format, selected_block=None):
+def _convert_to_pdb(source: Path, destination: Path, fmt: str) -> None:
     obabel = _find_obabel()
     if not obabel:
-        raise RuntimeError("Open Babel executable 'obabel' was not found. Install openbabel-wheel in the panVizPlus environment.")
-    source = Path(input_path)
-    cleanup = None
-    if selected_block is not None:
-        # Create, close, and then write the selected pose so no Python handle
-        # remains open while Open Babel reads the file on Windows.
-        temp = tempfile.NamedTemporaryFile(
-            mode="w", prefix="panviz_pose_", suffix="." + input_format,
-            encoding="utf-8", newline="", delete=False
-        )
-        try:
-            temp.write(selected_block + "\n")
-            temp.flush()
-        finally:
-            temp.close()
-        cleanup = Path(temp.name)
-        source = cleanup
-    try:
-        cmd = [obabel, "-i", input_format, str(source), "-o", "pdb", "-O", str(output_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if result.returncode != 0 or not Path(output_path).exists():
-            msg = (result.stderr or result.stdout or "Open Babel conversion failed.").strip()
-            raise RuntimeError(msg)
-    finally:
-        # Cleanup failure must not mask a successful Open Babel conversion.
-        _safe_remove(cleanup)
+        raise RuntimeError("Open Babel executable was not found; PDB input remains available.")
+    run = subprocess.run(
+        [obabel, "-i", fmt, str(source), "-o", "pdb", "-O", str(destination)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if run.returncode != 0 or not destination.exists():
+        raise RuntimeError((run.stderr or run.stdout or "Open Babel conversion failed.").strip())
 
-def _normalize_docked_ligand_pdb(pdb_path, out_path, chain="Z", residue_number=900, residue_name="LIG", start_serial=1):
-    """Normalize a converted docking pose into a PLIP-friendly ligand residue.
 
-    Atom serials are rewritten consistently and any CONECT records emitted by Open Babel
-    are remapped to the new serials and placed before END, preserving ligand connectivity.
-    """
-    lines = Path(pdb_path).read_text(encoding="utf-8", errors="replace").splitlines()
-    atom_lines=[]; conect=[]; serial_map={}
-    serial=max(1, int(start_serial))
+def _pdbqt_models(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    blocks = re.findall(r"MODEL\s+\d+.*?ENDMDL", text, flags=re.S | re.I)
+    return blocks or [text]
+
+
+def _vina_scores(blocks: list[str]) -> list[float | None]:
+    out = []
+    for block in blocks:
+        m = re.search(r"REMARK\s+VINA\s+RESULT:\s+(-?\d+(?:\.\d+)?)", block, flags=re.I)
+        out.append(float(m.group(1)) if m else None)
+    return out
+
+
+def _normalize_ligand_pdb(raw_pdb: Path, out_pdb: Path, start_serial: int) -> None:
+    lines = raw_pdb.read_text(encoding="utf-8", errors="replace").splitlines()
+    atoms, conect, serial_map = [], [], {}
+    serial = start_serial
     for line in lines:
         if line.startswith(("ATOM", "HETATM")):
-            s=line.ljust(80)
-            record="HETATM"
-            atom_name=s[12:16]
-            element=s[76:78].strip()
+            s = line.ljust(80)
+            try:
+                old = int(s[6:11])
+            except ValueError:
+                old = None
+            if old is not None:
+                serial_map[old] = serial
+            atom_name = s[12:16]
+            element = s[76:78].strip()
             if not element:
-                raw = re.sub(r"[^A-Za-z]", "", atom_name).strip()
-                element = raw[:2].title() if raw[:2].lower() in {"cl","br"} else raw[:1].upper()
-            x=s[30:38]; y=s[38:46]; z=s[46:54]
-            charge=s[78:80] if len(s)>=80 else "  "
-            old_serial = s[6:11].strip()
-            if old_serial.isdigit():
-                serial_map[int(old_serial)] = serial
-            new=(f"{record:<6}{serial:5d} {atom_name:>4} {residue_name:>3} {chain:1}{residue_number:4d}    "
-                 f"{x:>8}{y:>8}{z:>8}  1.00  0.00          {element:>2}{charge:>2}")
-            atom_lines.append(new)
-            serial+=1
+                raw = re.sub(r"[^A-Za-z]", "", atom_name)
+                element = raw[:2].title() if raw[:2].lower() in {"cl", "br"} else raw[:1].upper()
+            charge = s[78:80] if len(s) >= 80 else "  "
+            atoms.append(
+                f"HETATM{serial:5d} {atom_name:>4} LIG Z 900    "
+                f"{s[30:38]:>8}{s[38:46]:>8}{s[46:54]:>8}  1.00  0.00          {element:>2}{charge:>2}"
+            )
+            serial += 1
         elif line.startswith("CONECT"):
-            fields=line.split()[1:]
-            nums=[]
-            for token in fields:
+            nums = []
+            for tok in line.split()[1:]:
                 try:
-                    nums.append(serial_map.get(int(token)))
+                    mapped = serial_map.get(int(tok))
                 except ValueError:
-                    nums.append(None)
-            nums=[n for n in nums if n is not None]
-            if len(nums)>=2:
+                    mapped = None
+                if mapped is not None:
+                    nums.append(mapped)
+            if len(nums) >= 2:
                 conect.append("CONECT" + "".join(f"{n:5d}" for n in nums))
-    if not atom_lines:
-        raise RuntimeError("The selected PDBQT pose did not contain any atom records after conversion.")
-    Path(out_path).write_text("\n".join(atom_lines + conect + ["TER", "END"]) + "\n", encoding="utf-8")
+    if not atoms:
+        raise RuntimeError("Converted ligand contains no atoms.")
+    out_pdb.write_text("\n".join(atoms + conect + ["TER", "END"]) + "\n", encoding="utf-8")
 
-def _validate_pdb_has_atoms(path, role):
-    lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
-    if not any(line.startswith(("ATOM", "HETATM")) for line in lines):
-        raise RuntimeError(f"The uploaded {role} does not contain any ATOM/HETATM records.")
 
-def _build_pdbqt_complex(receptor_path, ligand_path, work_root, pose_index=0):
-    receptor_pdb = work_root / "receptor.pdb"
-    ligand_pdb_raw = work_root / "ligand_raw.pdb"
-    ligand_pdb = work_root / "ligand_normalized.pdb"
-
-    receptor_suffix = Path(receptor_path).suffix.lower()
-    if receptor_suffix == ".pdbqt":
-        _convert_with_obabel(receptor_path, receptor_pdb, "pdbqt")
+def _prepare_docking_complex(receptor: Path, ligand: Path, pose_index: int, root: Path) -> Path:
+    receptor_pdb = root / "native_receptor.pdb"
+    if receptor.suffix.lower() == ".pdb":
+        receptor_pdb.write_bytes(receptor.read_bytes())
     else:
-        receptor_pdb.write_bytes(Path(receptor_path).read_bytes())
-    _validate_pdb_has_atoms(receptor_pdb, "protein / receptor")
+        _convert_to_pdb(receptor, receptor_pdb, "pdbqt")
 
-    blocks = _extract_pdbqt_models(ligand_path)
-    if pose_index < 0 or pose_index >= len(blocks):
-        raise ValueError(f"Docking pose {pose_index + 1} is outside the available range (1–{len(blocks)}).")
-    _convert_with_obabel(ligand_path, ligand_pdb_raw, "pdbqt", selected_block=blocks[pose_index])
-    _validate_pdb_has_atoms(ligand_pdb_raw, "ligand / docking pose")
+    blocks = _pdbqt_models(ligand)
+    if pose_index >= len(blocks):
+        raise RuntimeError("Selected pose is outside the available pose range.")
+    pose_src = root / "selected_pose.pdbqt"
+    pose_src.write_text(blocks[pose_index] + "\n", encoding="utf-8")
+    raw_ligand = root / "selected_pose_raw.pdb"
+    _convert_to_pdb(pose_src, raw_ligand, "pdbqt")
 
-    receptor_serials=[]
-    for line in receptor_pdb.read_text(encoding="utf-8", errors="replace").splitlines():
+    receptor_lines = receptor_pdb.read_text(encoding="utf-8", errors="replace").splitlines()
+    serials = []
+    kept_receptor = []
+    for line in receptor_lines:
+        if line.startswith(("ATOM", "HETATM", "TER")):
+            kept_receptor.append(line)
         if line.startswith(("ATOM", "HETATM")):
             try:
-                receptor_serials.append(int(line[6:11]))
+                serials.append(int(line[6:11]))
             except ValueError:
                 pass
-    ligand_start=(max(receptor_serials)+1) if receptor_serials else 1
-    _normalize_docked_ligand_pdb(
-        ligand_pdb_raw,
-        ligand_pdb,
-        start_serial=ligand_start,
-    )
 
-    combined = work_root / "panviz_pdbqt_complex.pdb"
-    receptor_lines=[x for x in receptor_pdb.read_text(encoding="utf-8", errors="replace").splitlines() if x[:6].strip() in {"ATOM", "HETATM", "TER"}]
-    ligand_lines=[x for x in ligand_pdb.read_text(encoding="utf-8", errors="replace").splitlines() if x[:6].strip() in {"ATOM", "HETATM", "TER"}]
-    combined.write_text("\n".join(receptor_lines + ["TER"] + ligand_lines + ["END"]) + "\n", encoding="utf-8")
-    return combined, len(blocks)
+    normalized_ligand = root / "selected_pose_ligand.pdb"
+    _normalize_ligand_pdb(raw_ligand, normalized_ligand, max(serials, default=0) + 1)
+    lig_lines = [
+        x for x in normalized_ligand.read_text(encoding="utf-8").splitlines()
+        if x.startswith(("HETATM", "CONECT", "TER"))
+    ]
 
-def _sha256_bytes(data):
-    return hashlib.sha256(data).hexdigest()
+    combined = root / "panvizplus_native_complex.pdb"
+    combined.write_text("\n".join(kept_receptor + ["TER"] + lig_lines + ["END"]) + "\n", encoding="utf-8")
+    return combined
 
 
-def _pose_scores(path):
-    """Return Vina REMARK scores in MODEL order when available."""
-    text = Path(path).read_text(encoding="utf-8", errors="replace")
-    blocks = _extract_pdbqt_models(path)
-    scores = []
-    for block in blocks:
-        score = None
-        for line in block.splitlines():
-            m = re.search(r"REMARK\s+VINA\s+RESULT:\s+(-?\d+(?:\.\d+)?)", line, flags=re.I)
-            if m:
-                try:
-                    score = float(m.group(1))
-                except ValueError:
-                    pass
+def _records_frame(records) -> pd.DataFrame:
+    rows = []
+    for r in records:
+        distance = None
+        for key in (
+            "distance", "donor_acceptor_distance", "center_distance", "centroid_distance",
+            "ligand_water_distance", "ligand_metal_distance",
+        ):
+            value = r.measurements.get(key)
+            if isinstance(value, (float, int)):
+                distance = value
                 break
-        scores.append(score)
-    return scores
+        rows.append({
+            "Interaction": r.interaction_type,
+            "Residue": f"{r.residue_name}{r.residue_number}:{r.chain_id or '-'}",
+            "Ligand site": r.ligand_site,
+            "Protein site": r.protein_site,
+            "Distance (Å)": distance,
+            "Measurements": json.dumps(r.measurements, ensure_ascii=False),
+            "Criteria": "; ".join(
+                f"{c.name} {c.comparator} {c.threshold}{' '+c.units if c.units else ''}"
+                for c in r.criteria
+            ),
+            "Chemistry confidence": r.metadata.get("chemistry_confidence") or r.metadata.get("ligand_feature_confidence"),
+            "Chemistry source": r.metadata.get("chemistry_source") or r.metadata.get("ligand_feature_source"),
+            "Ruleset": r.ruleset,
+            "Detector": r.detector,
+        })
+    return pd.DataFrame(rows)
 
 
-def _zip_tree(source_root, output_zip):
-    source_root = Path(source_root)
-    output_zip = Path(output_zip)
-    with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in source_root.rglob("*"):
-            if path.is_file() and path != output_zip:
-                zf.write(path, path.relative_to(source_root))
+def _custom_rules() -> dict:
+    rules = copy.deepcopy(load_ruleset())
+    with st.expander("Advanced scientific criteria", expanded=False):
+        st.caption("Defaults are versioned in the panVizPlus rule registry. Any change applies only to this analysis.")
+        rules["interactions"]["conventional_hbond"]["geometry"]["donor_acceptor_distance_max"] = st.number_input(
+            "H-bond D···A maximum (Å)", 2.5, 4.5,
+            float(rules["interactions"]["conventional_hbond"]["geometry"]["donor_acceptor_distance_max"]), 0.1
+        )
+        rules["interactions"]["hydrophobic_contact"]["geometry"]["atom_distance_max"] = st.number_input(
+            "Hydrophobic atom distance maximum (Å)", 3.5, 6.0,
+            float(rules["interactions"]["hydrophobic_contact"]["geometry"]["atom_distance_max"]), 0.1
+        )
+        rules["interactions"]["salt_bridge"]["geometry"]["charge_center_distance_max"] = st.number_input(
+            "Salt-bridge distance maximum (Å)", 3.0, 6.0,
+            float(rules["interactions"]["salt_bridge"]["geometry"]["charge_center_distance_max"]), 0.1
+        )
+        rules["interactions"]["pi_pi"]["common_geometry"]["center_distance_max"] = st.number_input(
+            "π–π centroid distance maximum (Å)", 4.0, 7.0,
+            float(rules["interactions"]["pi_pi"]["common_geometry"]["center_distance_max"]), 0.1
+        )
+        rules["interactions"]["pi_cation"]["geometry"]["center_distance_max"] = st.number_input(
+            "π–cation center distance maximum (Å)", 3.5, 7.0,
+            float(rules["interactions"]["pi_cation"]["geometry"]["center_distance_max"]), 0.1
+        )
+        rules["interactions"]["halogen_bond"]["geometry"]["C_X_A_angle_min"] = st.number_input(
+            "Halogen C–X···A minimum angle (°)", 100.0, 180.0,
+            float(rules["interactions"]["halogen_bond"]["geometry"]["C_X_A_angle_min"]), 5.0
+        )
+        rules["interactions"]["metal_coordination"]["geometry"]["distance_max"] = st.number_input(
+            "Metal coordination distance maximum (Å)", 2.0, 4.0,
+            float(rules["interactions"]["metal_coordination"]["geometry"]["distance_max"]), 0.1
+        )
+        rules["interactions"]["water_bridge"]["geometry"]["heavy_atom_distance_max"] = st.number_input(
+            "Water-bridge heavy-atom maximum (Å)", 2.5, 4.5,
+            float(rules["interactions"]["water_bridge"]["geometry"]["heavy_atom_distance_max"]), 0.1
+        )
+    return rules
 
 
-def _write_project_manifest(result, manifest_path):
-    manifest = {
-        "panviz_version": PANVIZ_VERSION,
-        "created_utc": datetime.now(timezone.utc).isoformat(),
-        "input_mode": result["input_mode"],
-        "source_files": result["source_files"],
-        "selected_site": result["selected_site"],
-        "figure_width": result["figure_width"],
-        "figure_height": result["figure_height"],
-        "pose_index": result.get("pose_index"),
-        "pose_score_kcal_mol": result.get("pose_score"),
-        "binding_site_count": result["binding_site_count"],
-        "figure_interaction_count": int(len(result["figure_interaction_df"])),
-        "figure_residue_count": int(result["figure_interaction_df"]["Residue"].nunique()) if not result["figure_interaction_df"].empty else 0,
-        "figure_interaction_types": sorted(result["figure_interaction_df"]["Interaction"].dropna().unique().tolist()) if not result["figure_interaction_df"].empty else [],
-        "total_plip_record_count": int(len(result["scientific_df"])),
-        "total_plip_interaction_types": sorted(result["scientific_df"]["Interaction"].dropna().unique().tolist()) if not result["scientific_df"].empty else [],
-        "scientific_record_signature_sha256": result.get("scientific_signature"),
-        "publication_renderer_baseline": "3c6a3390f65c5f30ccb367b52cf916cd5683d0e6",
-        "legacy_five_class_renderer_baseline": "237db30af8639379ed3976657f9bbcce28110725",
-        "renderer_scene_schema_version": result.get("scene", {}).get("version"),
-        "renderer_revision": PANVIZ_RENDERER_REVISION,
-        "scientific_data_policy": "PLIP interaction measurements are normalized independently of presentation styling; the approved publication renderer remains unchanged.",
-    }
-    Path(manifest_path).write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+root = _workspace()
+st.markdown('<div class="card"><h4>1 · Input structure</h4>', unsafe_allow_html=True)
+mode = st.radio("Input mode", ["PDB complex", "Docking PDBQT"], horizontal=True)
 
+source_pdb = None
+source_signature = ""
+pose_score = None
 
-print("APPCHK 16 — before input section markdown", flush=True)
-st.markdown('<div class="panviz-section"><h4>1 · Input structure</h4>', unsafe_allow_html=True)
-print("APPCHK 17 — input section markdown OK", flush=True)
-print("APPCHK 18 — before input_mode radio", flush=True)
-input_mode=st.radio("Input mode",["PDB complex","Docking PDBQT"],horizontal=True)
-print(f"APPCHK 19 — input_mode radio OK ({input_mode})", flush=True)
-print("APPCHK 20 — before session workspace", flush=True)
-if "panviz_work_root" not in st.session_state or not Path(st.session_state.panviz_work_root).exists():
-    st.session_state.panviz_work_root=tempfile.mkdtemp(prefix="panviz_")
-work_root=Path(st.session_state.panviz_work_root)
-print(f"APPCHK 21 — session workspace OK ({work_root})", flush=True)
-source_files=[]
-source_payloads=[]
-pose_index=None
-pose_score=None
-
-if input_mode=="PDB complex":
-    print("APPCHK 22 — before PDB file_uploader", flush=True)
-    uploaded=st.file_uploader("Upload protein–ligand PDB complex",type=["pdb"],help="Upload a complete PDB complex containing the protein and ligand.")
-    print(f"APPCHK 23 — PDB file_uploader OK (uploaded={uploaded is not None})", flush=True)
-    if not uploaded:
-        print("APPCHK 24 — before no-upload info", flush=True)
-        st.info("Upload a PDB complex to begin.")
-        print("APPCHK 25 — no-upload info OK", flush=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        print("APPCHK 26 — closing markdown OK; about to st.stop", flush=True)
-        st.stop()
-    pdb_path=work_root/uploaded.name
-    file_bytes=uploaded.getvalue()
-    pdb_path.write_bytes(file_bytes)
-    source_stem=Path(uploaded.name).stem
-    source_files=[uploaded.name]
-    source_payloads=[(uploaded.name,file_bytes)]
+if mode == "PDB complex":
+    uploaded = st.file_uploader("Upload protein–ligand PDB complex", type=["pdb"])
+    if uploaded is not None:
+        source_pdb = root / uploaded.name
+        data = uploaded.getvalue()
+        source_pdb.write_bytes(data)
+        source_signature = hashlib.sha256(data).hexdigest()
 else:
-    left_card, right_card = st.columns(2, gap="large")
-    with left_card:
-        with st.container(border=True):
-            st.markdown('<div class="pdbqt-step">01 · PROTEIN INPUT</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pdbqt-card-title">PROTEIN / RECEPTOR</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pdbqt-card-desc">Upload the macromolecular receptor structure.</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pdbqt-example">Accepted: <b>.pdb</b> or <b>.pdbqt</b> · Example: <code>1LF2_receptor.pdbqt</code></div>', unsafe_allow_html=True)
-            receptor_upload=st.file_uploader("Upload PROTEIN / RECEPTOR",type=["pdb","pdbqt"],help="This is the protein/macromolecular receptor. Upload a receptor PDB or PDBQT file.",key="pdbqt_receptor_upload")
-    with right_card:
-        with st.container(border=True):
-            st.markdown('<div class="pdbqt-step">02 · LIGAND INPUT</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pdbqt-card-title">LIGAND / DOCKING POSES</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pdbqt-card-desc">Upload the docked ligand or Vina output containing one or more poses.</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pdbqt-example">Accepted: <b>.pdbqt</b> · Example: <code>compound_01_out.pdbqt</code></div>', unsafe_allow_html=True)
-            ligand_upload=st.file_uploader("Upload LIGAND / DOCKING POSES",type=["pdbqt"],help="This is the docked ligand/Vina output. Upload a ligand PDBQT containing one or more MODEL poses.",key="pdbqt_ligand_upload")
-    if not receptor_upload or not ligand_upload:
-        st.info("Upload both files: first the **PROTEIN / RECEPTOR**, then the **LIGAND / DOCKING POSES**.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.stop()
-    receptor_path=work_root/receptor_upload.name; receptor_bytes=receptor_upload.getvalue(); receptor_path.write_bytes(receptor_bytes)
-    ligand_path=work_root/ligand_upload.name; ligand_bytes=ligand_upload.getvalue(); ligand_path.write_bytes(ligand_bytes)
-    source_files=[receptor_upload.name, ligand_upload.name]
-    source_payloads=[(receptor_upload.name,receptor_bytes),(ligand_upload.name,ligand_bytes)]
-    pose_blocks=_extract_pdbqt_models(ligand_path)
-    scores=_pose_scores(ligand_path)
-    pose_options=list(range(1,len(pose_blocks)+1))
-    def _pose_label(x):
-        score=scores[x-1] if x-1 < len(scores) else None
-        return f"Pose {x}" + (f"  ·  Vina {score:.2f} kcal/mol" if score is not None else "")
-    pose_index=st.selectbox("Docking pose",pose_options,format_func=_pose_label)-1
-    pose_score=scores[pose_index] if pose_index < len(scores) else None
-    try:
-        pdb_path,nposes=_build_pdbqt_complex(receptor_path,ligand_path,work_root,pose_index=pose_index)
-    except Exception as exc:
-        st.error(f"PDBQT preparation failed: {exc}")
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.stop()
-    source_stem=Path(ligand_upload.name).stem
-    st.success(f"Prepared docking pose {pose_index+1} of {nposes} as a PLIP-ready PDB complex." + (f" Vina score: {pose_score:.2f} kcal/mol." if pose_score is not None else ""))
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-try:binding_sites=_eligible_binding_sites(pdb_path)
-except Exception as exc:st.error(f"The structure could not be read by PLIP: {exc}");st.stop()
-if not binding_sites:st.error("No eligible small-molecule binding site was detected in the prepared structure.");st.stop()
-st.success(f"Detected {len(binding_sites)} eligible binding site(s).")
-st.markdown('<div class="panviz-section"><h4>2 · Analysis setup</h4>', unsafe_allow_html=True)
-left,right=st.columns([1,1])
-with left:selected_site=st.selectbox("Ligand / binding site",binding_sites)
-with right:out_width=st.number_input("Figure width",min_value=700,max_value=3000,value=1200,step=100)
-out_height=st.number_input("Figure height",min_value=500,max_value=3000,value=850,step=50)
-analyze=st.button("Analyze with panVizPlus",type="primary",use_container_width=True)
-st.markdown("</div>", unsafe_allow_html=True)
-
-result_key_payload = {
-    "panviz_version": PANVIZ_VERSION,
-    "renderer_revision": PANVIZ_RENDERER_REVISION,
-    "mode": input_mode,
-    "source_hashes": [_sha256_bytes(x[1]) for x in source_payloads],
-    "pose": pose_index,
-    "site": selected_site,
-    "width": int(out_width),
-    "height": int(out_height),
-}
-result_key=_sha256_bytes(json.dumps(result_key_payload,sort_keys=True).encode())
-
-if analyze:
-    results_root=work_root/"panVizPlus_results";results_root.mkdir(parents=True,exist_ok=True)
-    with st.spinner("Running interaction analysis and building the interactive editor…"):
+    left, right = st.columns(2)
+    with left:
+        receptor_upload = st.file_uploader("Protein / receptor", type=["pdb", "pdbqt"], key="native_receptor")
+    with right:
+        ligand_upload = st.file_uploader("Ligand / docking poses", type=["pdbqt"], key="native_ligand")
+    if receptor_upload is not None and ligand_upload is not None:
+        receptor = root / receptor_upload.name
+        ligand = root / ligand_upload.name
+        receptor.write_bytes(receptor_upload.getvalue())
+        ligand.write_bytes(ligand_upload.getvalue())
+        blocks = _pdbqt_models(ligand)
+        scores = _vina_scores(blocks)
+        pose = st.selectbox(
+            "Docking pose",
+            list(range(len(blocks))),
+            format_func=lambda i: f"Pose {i+1}" + (f" · Vina {scores[i]:.2f} kcal/mol" if scores[i] is not None else ""),
+        )
+        pose_score = scores[pose]
         try:
-            analysis_obj=plip_2d_interactions(
-                str(pdb_path),
-                selected_site,
-                save_files=False,
-                save_pymol=False,
-                canvas_height=int(out_height),
-                canvas_width=int(out_width),
-                output_dir=str(results_root),
-            )
-            site_dir=Path(analysis_obj["binding_site_dir"])
-            interaction_dir=Path(analysis_obj["interactions_dir"])
-            scientific_df,scientific_tables=build_scientific_records(analysis_obj["my_interactions"])
-            scientific_exports=write_scientific_exports(
-                scientific_df,
-                scientific_tables,
-                interaction_dir,
-            )
-            scene,scene_root=build_editor_scene(
-                str(pdb_path),
-                selected_site,
-                width=int(out_width),
-                height=int(out_height),
-                base_svg=None,
-                analysis=analysis_obj,
-            )
-            figure_df=build_figure_records(scene)
-            (site_dir/"panVizPlus_initial_layout.json").write_text(json.dumps(scene,indent=2,ensure_ascii=False),encoding="utf-8")
-            result={
-                "key": result_key,
-                "input_mode": input_mode,
-                "source_files": [
-                    {"name":name,"sha256":_sha256_bytes(data)} for name,data in source_payloads
-                ],
-                "source_payloads": source_payloads,
-                "selected_site": selected_site,
-                "figure_width": int(out_width),
-                "figure_height": int(out_height),
-                "pose_index": pose_index,
-                "pose_score": pose_score,
-                "binding_site_count": len(binding_sites),
-                "interaction_df": figure_df,
-                "figure_interaction_df": figure_df,
-                "scientific_df": scientific_df,
-                "site_dir": str(site_dir),
-                "prepared_pdb": str(analysis_obj["file_prot"]),
-                "results_root": str(results_root),
-                "scene": scene,
-                "analysis_obj": analysis_obj,
-                "scientific_exports": scientific_exports,
-                "scientific_signature": scientific_exports["signature"],
-            }
-            inputs_dir=results_root/"inputs";inputs_dir.mkdir(parents=True,exist_ok=True)
-            for name,data in source_payloads:
-                target=inputs_dir/Path(name).name
-                target.write_bytes(data)
-            project_readme = results_root/"PROJECT_README.md"
-            project_readme.write_text(
-                f"# panVizPlus {PANVIZ_VERSION} project bundle\n\n"
-                "This package contains the original uploaded input file(s), the PLIP-prepared complex, "
-                "canonical scientific interaction records, the initial editable layout, "
-                "and a machine-readable manifest. Presentation styling in panVizPlus does not modify the underlying "
-                "scientific interaction records. Native and PLIP records preserve detector provenance. Use the editor's **Save layout** and **Load layout** controls "
-                "to carry edited presentation state between sessions.\n",
-                encoding="utf-8"
-            )
-            _write_project_manifest(result, site_dir/"panVizPlus_manifest.json")
-            zip_path=results_root/f"{source_stem}_panVizPlus_project.zip"
-            _zip_tree(results_root,zip_path)
-            result["project_zip"]=str(zip_path)
-            st.session_state.panviz_result=result
+            source_pdb = _prepare_docking_complex(receptor, ligand, pose, root)
+            source_signature = hashlib.sha256(
+                receptor_upload.getvalue() + ligand_upload.getvalue() + str(pose).encode()
+            ).hexdigest()
         except Exception as exc:
-            st.error(f"panVizPlus analysis failed: {exc}")
-            st.stop()
+            st.error(f"PDBQT preparation failed: {exc}")
+st.markdown("</div>", unsafe_allow_html=True)
 
-result=st.session_state.get("panviz_result")
-if not result or result.get("key")!=result_key:
-    st.info("Configure the analysis above, then click **Analyze with panVizPlus**. Generated results remain available until you change the input, pose, binding site, or canvas size.")
+if source_pdb is None:
+    st.info("Upload the required structure file(s) to begin.")
     st.stop()
 
-st.markdown('<div class="panviz-section"><h4>3 · Scientific summary</h4>', unsafe_allow_html=True)
-scientific_df=result.get("scientific_df", pd.DataFrame())
-interaction_classes=int(scientific_df["Interaction"].nunique()) if not scientific_df.empty and "Interaction" in scientific_df.columns else 0
-m1,m2,m3,m4=st.columns(4)
-m1.metric("Detected interactions", int(len(scientific_df)))
-m2.metric("Interaction classes", interaction_classes)
-m3.metric("Binding site", result["selected_site"])
-m4.metric("Figure interactions", int(len(result.get("figure_interaction_df", []))))
-st.caption(
-    "panVizPlus presents one scientific interaction result set. Detector identity and raw provenance "
-    "are retained in the exported project files and methodology metadata."
+try:
+    structure = read_pdb(source_pdb)
+except Exception as exc:
+    st.error(f"Structure parsing failed: {exc}")
+    st.stop()
+
+ligand_residues = structure.ligand_residues()
+if not ligand_residues:
+    st.error("No non-water small-molecule HETATM residue was found.")
+    st.stop()
+
+st.markdown('<div class="card"><h4>2 · Analysis setup</h4>', unsafe_allow_html=True)
+ligand_tuple = st.selectbox(
+    "Ligand",
+    ligand_residues,
+    format_func=lambda x: f"{x[0]}:{x[1] or '-'}:{x[2]}",
 )
+ligand_selector = f"{ligand_tuple[0]}:{ligand_tuple[1] or '-'}:{ligand_tuple[2]}"
+c1, c2 = st.columns(2)
+with c1:
+    fig_width = st.number_input("Figure width", 800, 2200, 1200, 100)
+with c2:
+    fig_height = st.number_input("Figure height", 600, 1600, 820, 50)
+rules = _custom_rules()
+run_analysis = st.button("Analyze with panVizPlus", type="primary", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown('<div class="panviz-section"><h4>4 · Interactive figure editor</h4>', unsafe_allow_html=True)
-render_editor(result["scene"])
+rule_signature = hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+result_key = (source_signature, ligand_selector, rule_signature, int(fig_width), int(fig_height))
+
+if run_analysis:
+    with st.spinner("Running native panVizPlus interaction engine…"):
+        records = analyze_structure(structure, ligand_selector, rules)
+        frame = _records_frame(records)
+        svg = render_interaction_svg(structure, ligand_selector, records, int(fig_width), int(fig_height))
+        st.session_state.native_result = {
+            "key": result_key,
+            "records": records,
+            "frame": frame,
+            "svg": svg,
+            "warnings": list(structure.warnings),
+            "rules": rules,
+            "pose_score": pose_score,
+        }
+
+result = st.session_state.get("native_result")
+if not result or result.get("key") != result_key:
+    st.info("Click **Analyze with panVizPlus** to run the native interaction engine.")
+    st.stop()
+
+frame = result["frame"]
+records = result["records"]
+types = frame["Interaction"].nunique() if not frame.empty else 0
+residues = frame["Residue"].nunique() if not frame.empty else 0
+unfavorable = int((frame["Interaction"] == "unfavorable_vdw_bump").sum()) if not frame.empty else 0
+
+st.markdown('<div class="card"><h4>3 · Native scientific summary</h4>', unsafe_allow_html=True)
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Interactions", len(records))
+m2.metric("Interaction classes", int(types))
+m3.metric("Interacting residues", int(residues))
+m4.metric("Unfavorable contacts", unfavorable)
+if result.get("pose_score") is not None:
+    st.caption(f"Selected docking pose Vina score: {result['pose_score']:.2f} kcal/mol")
+for warning in result["warnings"]:
+    st.warning(warning)
 st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown('<div class="panviz-section"><h4>5 · Scientific evidence & downloads</h4>', unsafe_allow_html=True)
-with st.expander("Detected interaction table", expanded=False):
-    detected_df=result.get("scientific_df", pd.DataFrame())
-    if detected_df.empty:
-        st.info("No supported protein–ligand interactions were detected for this binding site.")
-    else:
-        st.dataframe(detected_df, use_container_width=True, hide_index=True)
-    st.caption("These are the scientific records represented by the analysis backend; raw detector provenance is preserved in the exports.")
+st.markdown('<div class="card"><h4>4 · Native interaction diagram</h4>', unsafe_allow_html=True)
+components.html(result["svg"], height=int(fig_height) + 20, scrolling=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
-plip_csv=Path(result["scientific_exports"]["csv"])
-plip_json=Path(result["scientific_exports"]["json"])
-project_zip=Path(result["project_zip"])
-d1,d2,d3=st.columns(3)
+st.markdown('<div class="card"><h4>5 · Scientific records</h4>', unsafe_allow_html=True)
+if frame.empty:
+    st.info("No interactions passed the currently selected panVizPlus rules.")
+else:
+    st.dataframe(frame, use_container_width=True, hide_index=True)
+st.markdown("</div>", unsafe_allow_html=True)
+
+with st.expander("Methodology and rule provenance", expanded=False):
+    st.write(
+        "All displayed interactions are generated by the panVizPlus native engine. "
+        "Rules are explicit and versioned; no external protein–ligand interaction detector is called."
+    )
+    st.json(result["rules"])
+
+csv_bytes = frame.to_csv(index=False).encode("utf-8")
+json_bytes = json.dumps(
+    [
+        {
+            "interaction_id": r.interaction_id,
+            "interaction_type": r.interaction_type,
+            "ligand_site": r.ligand_site,
+            "protein_site": r.protein_site,
+            "residue": f"{r.residue_name}{r.residue_number}:{r.chain_id or '-'}",
+            "measurements": r.measurements,
+            "criteria": [c.__dict__ if hasattr(c, "__dict__") else {
+                "name": c.name,
+                "measured_value": c.measured_value,
+                "comparator": c.comparator,
+                "threshold": c.threshold,
+                "units": c.units,
+                "passed": c.passed,
+            } for c in r.criteria],
+            "detector": r.detector,
+            "detector_version": r.detector_version,
+            "ruleset": r.ruleset,
+            "metadata": r.metadata,
+        }
+        for r in records
+    ],
+    indent=2,
+    ensure_ascii=False,
+).encode("utf-8")
+
+d1, d2, d3 = st.columns(3)
 with d1:
-    st.download_button("Download interactions CSV", data=plip_csv.read_bytes(), file_name="panVizPlus_interactions.csv", mime="text/csv", use_container_width=True)
+    st.download_button("Download CSV", csv_bytes, "panVizPlus_interactions.csv", "text/csv", use_container_width=True)
 with d2:
-    st.download_button("Download interactions JSON", data=plip_json.read_bytes(), file_name="panVizPlus_interactions.json", mime="application/json", use_container_width=True)
+    st.download_button("Download JSON", json_bytes, "panVizPlus_interactions.json", "application/json", use_container_width=True)
 with d3:
-    st.download_button("Download complete project ZIP", data=project_zip.read_bytes(), file_name=project_zip.name, mime="application/zip", use_container_width=True)
-st.markdown("</div>", unsafe_allow_html=True)
+    st.download_button("Download SVG", result["svg"].encode("utf-8"), "panVizPlus_interaction_diagram.svg", "image/svg+xml", use_container_width=True)
 
-st.markdown(f'<div class="panviz-foot">panVizPlus v{PANVIZ_VERSION} · provenance-aware interaction analysis</div>', unsafe_allow_html=True)
-
+st.markdown(f'<div class="foot">panVizPlus {PANVIZ_VERSION} · native interaction engine</div>', unsafe_allow_html=True)

@@ -1,4 +1,4 @@
-"""Chemical feature perception for the initial panVizPlus H-bond detector."""
+"""Chemical feature perception for panVizPlus native interaction analysis."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ _PROTEIN_DONORS = {
     ("LYS", "NZ"), ("SER", "OG"), ("THR", "OG1"),
     ("TRP", "NE1"), ("TYR", "OH"), ("CYS", "SG"),
 }
-
 _PROTEIN_ACCEPTORS = {
     ("ASP", "OD1"), ("ASP", "OD2"), ("GLU", "OE1"), ("GLU", "OE2"),
     ("ASN", "OD1"), ("GLN", "OE1"), ("HIS", "ND1"), ("HIS", "NE2"),
@@ -36,7 +35,7 @@ def perceive_hbond_features(
     structure: NormalizedStructure,
     ligand_residue_name: str | None = None,
 ) -> tuple[list[ChemicalFeature], list[ChemicalFeature]]:
-    """Return protein and ligand H-bond features with provenance."""
+    """Return protein and ligand donor/acceptor features with provenance."""
     protein_features: list[ChemicalFeature] = []
     ligand_features: list[ChemicalFeature] = []
 
@@ -71,19 +70,34 @@ def perceive_hbond_features(
         heavy_neighbors = [n for n in structure.neighbors(atom.atom_id) if not n.is_hydrogen]
         hydrogen_ids = tuple(h.atom_id for h in _attached_hydrogens(structure, atom))
         neighbor_ids = tuple(n.atom_id for n in heavy_neighbors)
+        charge = atom.formal_charge or 0
 
-        if element in {"N", "O", "S"} and hydrogen_ids and (atom.formal_charge or 0) >= 0:
+        donor = False
+        donor_source = "pdb_connectivity_inference"
+        donor_conf = "low"
+        if element in {"N", "O", "S"} and charge >= 0:
+            if hydrogen_ids:
+                donor = True
+                donor_source = "pdb_explicit_hydrogen"
+                donor_conf = "medium"
+            elif element == "O" and len(heavy_neighbors) == 1:
+                donor = True
+            elif element == "S" and len(heavy_neighbors) == 1:
+                donor = True
+            elif element == "N" and len(heavy_neighbors) <= 2:
+                donor = True
+        if donor:
             ligand_features.append(ChemicalFeature(
-                atom.atom_id, "hydrogen_donor", "medium",
-                "pdb_explicit_hydrogen_inference", hydrogen_ids, neighbor_ids,
+                atom.atom_id, "hydrogen_donor", donor_conf, donor_source,
+                hydrogen_ids, neighbor_ids,
             ))
 
         acceptor = False
-        if element == "O" and (atom.formal_charge or 0) <= 0:
+        if element == "O" and charge <= 0:
             acceptor = len(heavy_neighbors) <= 2
-        elif element == "N" and (atom.formal_charge or 0) <= 0:
+        elif element == "N" and charge <= 0:
             acceptor = len(heavy_neighbors) <= 2 and not hydrogen_ids
-        elif element == "S" and (atom.formal_charge or 0) <= 0:
+        elif element == "S" and charge <= 0:
             acceptor = len(heavy_neighbors) <= 2
 
         if acceptor:

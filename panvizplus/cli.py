@@ -2,36 +2,33 @@ from __future__ import annotations
 
 import argparse
 
-from panvizplus.analysis import analyze_pdb
+from panvizplus.chemistry.pdb import read_pdb
+from panvizplus.interactions.engine import analyze_structure
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="panvizplus",
-        description="Audit protein-ligand interactions with panVizPlus.",
+        description="Run the native panVizPlus protein-ligand interaction engine.",
     )
     parser.add_argument("structure", help="PDB structure file")
-    parser.add_argument("--ligand", help="Ligand residue name")
+    parser.add_argument("--ligand", required=True, help="Ligand selector RESNAME:CHAIN:RESNUM")
     args = parser.parse_args()
 
-    interactions, warnings = analyze_pdb(args.structure, args.ligand)
-    for warning in warnings:
+    structure = read_pdb(args.structure)
+    records = analyze_structure(structure, args.ligand)
+    for warning in structure.warnings:
         print(f"WARNING: {warning}")
 
-    if not interactions:
-        print("No confirmed conventional protein-ligand H-bonds found.")
+    if not records:
+        print("No interactions passed the current panVizPlus rules.")
         return 0
 
-    print("ID\tLigand\tProtein\tD-A(A)\tGeometry\tLigand perception\tRule set")
-    for item in interactions:
+    print("ID\tType\tLigand\tProtein\tResidue\tRuleset")
+    for r in records:
         print(
-            f"{item.interaction_id}\t"
-            f"{item.ligand_site}\t"
-            f"{item.protein_site}\t"
-            f"{item.measurements.get('donor_acceptor_distance')}\t"
-            f"{item.metadata.get('geometry_mode')}\t"
-            f"{item.metadata.get('ligand_feature_confidence')}\t"
-            f"{item.ruleset}"
+            f"{r.interaction_id}\t{r.interaction_type}\t{r.ligand_site}\t"
+            f"{r.protein_site}\t{r.residue_name}{r.residue_number}:{r.chain_id or '-'}\t{r.ruleset}"
         )
     return 0
 

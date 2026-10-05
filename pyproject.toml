@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "panvizplus"
-version = "0.1.0.dev0"
-description = "Provenance-aware protein-ligand interaction analysis and 2D visualization"
+version = "0.2.0a0"
+description = "Native provenance-aware protein-ligand interaction analysis and 2D visualization"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "numpy>=1.26,<3",
   "PyYAML>=6.0",
 ]
 

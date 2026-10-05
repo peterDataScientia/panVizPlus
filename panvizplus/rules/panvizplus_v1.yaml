@@ -1,19 +1,19 @@
 metadata:
   id: panvizplus_v1
-  version: 0.1.1-draft
-  status: draft
+  version: 0.2.0-alpha
+  status: alpha
   exact_biovia_reproduction: false
   scientific_position: >
-    Open, auditable DS-compatible baseline informed by publicly described
-    interaction definitions and locally inspected Discovery Studio 2020 API/help
-    concepts. Values must be benchmarked before a stable release.
+    Native panVizPlus interaction rules. The engine is independent of PLIP and
+    does not claim exact reproduction of proprietary BIOVIA implementations.
+    Each interaction class exposes explicit chemical and geometric criteria.
   units:
     distance: angstrom
     angle: degree
 
 interactions:
   conventional_hbond:
-    status: provisional
+    status: alpha
     chemistry:
       from_site: hydrogen_donor
       to_site: hydrogen_acceptor
@@ -23,42 +23,40 @@ interactions:
       hay_angle_min: 90.0
       xda_angle_min: 90.0
       day_angle_min: 90.0
-      explicit_hydrogen_geometry:
-        DHA: required_when_hydrogen_present
-        HAY: used_when_acceptor_neighbor_is_available
-      missing_hydrogen_geometry:
-        XDA: used_when_donor_neighbor_is_available
-        DAY: used_when_acceptor_neighbor_is_available
-    diagnostics:
-      candidate_distance_max: 4.0
-      interpretation: >
-        Diagnostic screening radius only. It preserves nearby donor-acceptor
-        candidates for PASS/FAIL inspection and is not itself an H-bond
-        detection cutoff.
-    confidence: architecture_high_numeric_modern_default_provisional
-    note: >
-      D-A distance and directional geometry are explicit research baselines.
-      The rule is not presented as an exact Discovery Studio 2026 default.
+    confidence: provisional_numeric_thresholds
 
-  carbon_hbond:
-    status: provisional
+  hydrophobic_contact:
+    status: alpha
     chemistry:
-      donor_class: aromatic_or_acetylene_CH
-      to_site: hydrogen_acceptor
+      ligand_elements: [C, S]
+      protein_sidechain_template: true
     geometry:
-      donor_acceptor_distance_max: 3.8
+      atom_distance_max: 4.5
     confidence: moderate
 
-  attractive_charge:
-    status: provisional
+  salt_bridge:
+    status: alpha
     chemistry:
       opposite_charge_required: true
     geometry:
-      site_distance_max: 5.6
+      charge_center_distance_max: 4.0
+    confidence: moderate
+
+  pi_pi:
+    status: alpha
+    chemistry:
+      two_planar_ring_systems_required: true
+    common_geometry:
+      center_distance_max: 6.0
+      closest_atom_distance_max: 4.5
+    stacked:
+      plane_angle_max: 30.0
+    t_shaped:
+      plane_angle_min: 60.0
     confidence: moderate
 
   pi_cation:
-    status: provisional
+    status: alpha
     chemistry:
       pi_system_required: true
       positive_site_required: true
@@ -66,57 +64,46 @@ interactions:
       center_distance_max: 5.0
     confidence: moderate
 
-  pi_pi:
-    status: provisional
+  halogen_bond:
+    status: alpha
     chemistry:
-      two_pi_systems_required: true
-    common_geometry:
-      center_distance_max: 6.0
-      closest_atom_distance_max: 4.5
-    stacked:
-      theta_max: 50.0
-      gamma_max: 35.0
-    t_shaped:
-      theta_max: 30.0
-      gamma_min: 55.0
-    confidence: moderate_to_high
-
-  alkyl:
-    status: provisional
-    chemistry:
-      hydrophobic_groups_required: true
+      ligand_halogen: [Cl, Br, I]
+      acceptor_elements: [N, O, S]
     geometry:
-      centroid_distance_max: 5.5
+      vdw_sum_scale_max: 1.0
+      C_X_A_angle_min: 150.0
     confidence: moderate
 
-  pi_alkyl:
-    status: provisional
+  metal_coordination:
+    status: alpha
     chemistry:
-      pi_system_required: true
-      hydrophobic_group_required: true
+      ligand_donor_elements: [N, O, S]
+      protein_donor_elements: [N, O, S]
     geometry:
-      centroid_distance_max: 5.5
+      distance_max: 2.8
+    confidence: moderate
+
+  water_bridge:
+    status: alpha
+    chemistry:
+      water_oxygen_required: true
+      donor_acceptor_features_required: true
+    geometry:
+      heavy_atom_distance_max: 3.5
     confidence: moderate
 
   unfavorable_vdw_bump:
-    status: provisional
+    status: alpha
     geometry:
       fraction_sum_vdw_radii_min: 0.70
       interpretation: >
         Atom pairs closer than this fraction of the sum of van der Waals radii
-        are candidates for an unfavorable bump.
+        are flagged as unfavorable steric contacts.
     confidence: moderate
 
 references:
-  - id: biovia_ds2020_local_help
-    kind: locally_inspected_vendor_help
+  - id: panvizplus_native_rule_registry
+    kind: internal_open_specification
     note: >
-      Discovery Studio 2020 Help/API exposed Mdm::NonbondType,
-      Mdm::NonbondCriterionType, donor/acceptor/pi/charge site properties,
-      explicit-H and missing-H hydrogen-bond geometry, and configurable criteria.
-  - id: biovia_2025_release
-    kind: vendor_release_notes
-    url: https://www.3ds.com/support/documentation/resource-library/t101-2024-notification-regarding-biovia-discovery-studio-2025
-  - id: biovia_2026_release
-    kind: vendor_release_notes
-    url: https://www.3ds.com/support/documentation/resource-library/t62-2025-discovery-studio-2026
+      Numeric thresholds are explicit, versioned, and benchmarkable. They are
+      research defaults rather than claims of exact proprietary-tool defaults.

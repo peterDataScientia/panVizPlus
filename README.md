@@ -1,120 +1,63 @@
 # panVizPlus
 
-**panVizPlus** is an open, provenance-aware framework for scientifically defensible protein–ligand interaction analysis and publication-quality 2D visualization.
+**panVizPlus** is a native, provenance-aware protein–ligand interaction analysis engine and Streamlit application.
 
-> **Project status:** early scientific-engineering foundation. The interaction rules and chemistry layer are being defined before the visualization UI is expanded.
-
-## Design principle
-
-panVizPlus separates four concerns that must not be mixed:
-
-1. **Chemistry normalization** — ligand identity, connectivity, bond order, aromaticity, formal charge, protonation metadata, waters/ions/cofactors.
-2. **Interaction perception** — chemically typed, interaction-specific geometric rules.
-3. **Provenance model** — every detected or manually added interaction retains atoms/sites, residue identity, measured geometry, rule version, detector, and source.
-4. **2D rendering and curation** — visualization consumes validated interaction records; the renderer does not decide chemistry.
+## Scientific architecture
 
 ```text
-PDB / mmCIF / SDF / MOL2
-          ↓
-Chemistry normalization
-          ↓
-Chemical feature perception
-          ↓
-Versioned interaction rules
-          ↓
-Provenance-rich interaction records
-          ↓
-2D layout / interactive curation
-          ↓
-SVG / PNG / PDF + interaction table
+PDB / PDBQT
+   ↓
+structure normalization
+   ↓
+chemical feature perception
+   ↓
+panVizPlus interaction engine
+   ↓
+versioned geometric rules
+   ↓
+InteractionRecord[]
+   ↓
+native 2D diagram + table + CSV/JSON/SVG
 ```
 
-## Scientific position
+The interaction engine is implemented inside `panvizplus/interactions/`. It does not call an external protein–ligand interaction detector.
 
-The project is informed by established tools including BIOVIA Discovery Studio and PLIP, but **panVizPlus does not claim to reproduce proprietary BIOVIA algorithms exactly**. Any Discovery-Studio-compatible rules are stored explicitly with provenance and confidence so they can be inspected, tested, and revised.
+## Current native interaction families
 
-Modern BIOVIA releases emphasize correct chemical representation (especially ligand bond orders/formal charges and mmCIF/CCD handling) before interaction analysis. panVizPlus follows the same general scientific principle while keeping its rules open and auditable.
+- conventional hydrogen bond
+- hydrophobic contact
+- salt bridge
+- π–π stacked
+- π–π T-shaped
+- π–cation
+- halogen bond
+- metal coordination
+- water bridge
+- unfavorable van der Waals contact
 
-## Repository layout
+Every interaction record stores ligand/protein sites, residue identity, measurements, criteria, detector version, ruleset version, chemistry-confidence metadata, and provenance.
 
-```text
-panvizplus/
-  chemistry/       # structure and chemical normalization
-  interactions/    # detector interfaces and interaction records
-  rules/           # versioned machine-readable criteria
-  layout/          # ligand/residue 2D layout
-  rendering/       # SVG/PNG/PDF output
-  validation/      # cross-tool and benchmark comparisons
+## Chemistry policy
 
-docs/
-  INTERACTION_SPECIFICATION.md
+PDB-only ligand chemistry can be incomplete. panVizPlus therefore marks connectivity-derived ligand chemical features with lower confidence instead of silently treating them as authoritative. PDBQT files are converted to PDB for coordinate/connectivity normalization; Open Babel is used only as a file-format converter.
 
-tests/
+## Run locally
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-## Immediate roadmap
+## Streamlit Community Cloud
 
-- [x] Establish package and interaction-specification architecture
-- [x] Add versioned rule registry with evidence/confidence metadata
-- [ ] Implement CCD-aware ligand chemistry normalization
-- [ ] Implement conventional and carbon H-bonds
-- [ ] Implement electrostatic and aromatic interactions
-- [ ] Implement hydrophobic, halogen, sulfur, metal and water-mediated interactions
-- [ ] Build benchmark suite against curated complexes and independent tools
-- [ ] Integrate the proven PANVIZ editor/renderer components
-- [ ] Add Streamlit application layer
+- repository: `peterDataScientia/panVizPlus`
+- branch: `main`
+- entrypoint: `app.py`
 
-## Reproducibility rule
+## Rule registry
 
-A reported interaction must be reproducible from:
+Scientific defaults are stored in:
 
-- input structure identity,
-- normalized chemical state,
-- detector/rule-set version,
-- atom or site identities,
-- measured geometric quantities,
-- pass/fail criteria,
-- automatic vs manual provenance.
+`panvizplus/rules/panvizplus_v1.yaml`
 
-See [docs/INTERACTION_SPECIFICATION.md](docs/INTERACTION_SPECIFICATION.md).
-
-## Name
-
-Project name: **panVizPlus**.
-
-
-## Streamlit application
-
-panVizPlus now includes a deployable Streamlit interface that reuses the proven PanViz publication editor while keeping scientific detector provenance explicit.
-
-### Current analysis layers
-
-- **Primary interaction analysis** — one user-facing result set covering hydrophobic contacts, hydrogen bonds, water bridges, salt bridges, pi-stacking, pi-cation, halogen bonds, and metal coordination, with detector provenance retained in project exports.
-
-### Supported inputs
-
-- Complete protein-ligand **PDB complex**
-- Docking workflow with **PDB/PDBQT receptor + PDBQT ligand poses**
-
-### Deployment on Streamlit Community Cloud
-
-1. Choose repository `peterDataScientia/panVizPlus`.
-2. Select branch `main`.
-3. Set the main file to `app.py`.
-4. Deploy.
-
-The repository includes `requirements.txt`, `packages.txt`, `.python-version`, and `.streamlit/config.toml` for cloud deployment.
-
-### Evidence and exports
-
-The app provides:
-
-- interactive publication figure editor;
-- hidden-on-demand scientific evidence table;
-- interaction CSV and JSON;
-- complete reproducibility project ZIP;
-- detector/ruleset provenance and warnings.
-
-### Important scientific status
-
-Version `0.1.0-alpha` is a working research application. The production interface presents a single interaction result set and preserves detector provenance in the project records. Experimental detector development remains internal until its chemistry perception and thresholds are sufficiently benchmarked for production use.
+Version `0.2.0-alpha` is an alpha scientific implementation. Rule thresholds are explicit and benchmarkable and are not presented as exact reproductions of proprietary software.
