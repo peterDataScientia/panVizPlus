@@ -159,6 +159,20 @@ def _populate_features(chemistry: LigandChemistry) -> None:
         elif charge < 0:
             chemistry.negative_atom_ids.add(atom_id)
 
+        # BaseFeatures intentionally does not label every aliphatic carbon as a
+        # hydrophobe. For contact detection we augment it using the sanitized
+        # RDKit molecular graph: neutral carbon with no directly bonded
+        # heteroatom is a conservative hydrophobic atom; neutral thioether-like
+        # sulfur is also accepted when carbon-bound.
+        if charge == 0 and atom.GetAtomicNum() == 6:
+            heavy_neighbors = [n for n in atom.GetNeighbors() if n.GetAtomicNum() != 1]
+            if all(n.GetAtomicNum() in {6, 9, 17, 35, 53} for n in heavy_neighbors):
+                chemistry.hydrophobe_atom_ids.add(atom_id)
+        elif charge == 0 and atom.GetAtomicNum() == 16:
+            heavy_neighbors = [n for n in atom.GetNeighbors() if n.GetAtomicNum() != 1]
+            if heavy_neighbors and all(n.GetAtomicNum() == 6 for n in heavy_neighbors):
+                chemistry.hydrophobe_atom_ids.add(atom_id)
+
     ring_info = mol.GetRingInfo()
     for ring in ring_info.AtomRings():
         if len(ring) < 5:
