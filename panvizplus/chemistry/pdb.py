@@ -127,12 +127,6 @@ def read_pdb(path: str | Path) -> NormalizedStructure:
         source_path=str(path),
     )
     _infer_local_connectivity(structure)
-    if structure.ligand_atoms():
-        structure.warnings.append(
-            "PDB alone does not encode complete ligand bond-order/protonation chemistry. "
-            "panVizPlus will use RDKit to perceive bond orders and chemical features; provide "
-            "the correct ligand net charge and prefer authoritative CCD/SDF/MOL2 chemistry when available."
-        )
     return structure
 
 

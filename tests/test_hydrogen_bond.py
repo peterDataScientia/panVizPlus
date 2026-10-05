@@ -57,15 +57,6 @@ END
     assert detect_conventional_hbonds(read_pdb(_write(tmp_path, pdb)), "LIG") == []
 
 
-def test_analysis_surfaces_pdb_chemistry_warning(tmp_path):
-    pdb = """ATOM      1  CA  SER A  10      -1.400   0.000   0.000  1.00 20.00           C
-HETATM    2  O1  LIG B   1       2.800   0.000   0.000  1.00 20.00           O
-END
-"""
-    _, warnings = analyze_pdb(_write(tmp_path, pdb), "LIG")
-    assert any("bond orders" in warning for warning in warnings)
-
-
 def test_audit_retains_rejected_candidate(tmp_path):
     pdb = """ATOM      1  CE  LYS A  20       1.400   0.000   0.000  1.00 20.00           C
 ATOM      2  NZ  LYS A  20       0.000   0.000   0.000  1.00 20.00           N

@@ -366,6 +366,7 @@ if run_analysis:
             "rules": rules,
             "chemistry": {
                 "source": chemistry.source,
+                "reconstruction_mode": chemistry.reconstruction_mode,
                 "confidence": chemistry.confidence,
                 "donors": len(chemistry.donor_atom_ids),
                 "acceptors": len(chemistry.acceptor_atom_ids),
