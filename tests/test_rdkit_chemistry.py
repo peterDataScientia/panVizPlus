@@ -57,7 +57,7 @@ def test_rdkit_preserves_quaternary_ammonium_charge():
     assert 1 in chemistry.positive_atom_ids
 
 
-def test_bad_pdb_connectivity_is_rebuilt_from_3d_coordinates():
+def test_invalid_pdb_graph_degrades_safely():
     atoms = [
         atom(1, "C1", "C", (0.0, 0.0, 0.0)),
         atom(2, "F1", "F", (1.30, 0.0, 0.0)),
@@ -66,13 +66,14 @@ def test_bad_pdb_connectivity_is_rebuilt_from_3d_coordinates():
         atom(5, "F4", "F", (0.0, 0.0, 1.30)),
         atom(6, "F5", "F", (5.0, 0.0, 0.0)),
     ]
-    # Deliberately impossible PDB graph: carbon appears bonded to five fluorines.
     s = NormalizedStructure(
         atoms=atoms,
         bonds={(1,2),(1,3),(1,4),(1,5),(1,6)},
     )
     chemistry = build_ligand_chemistry(s, "LIG:Z:1", net_charge=0)
-    assert chemistry.reconstruction_mode == "rdkit_3d_connectivity_rebuild"
-    assert chemistry.confidence == "high"
-    assert len(chemistry.mol.GetBonds()) == 4
-    assert chemistry.warnings == []
+    assert chemistry.reconstruction_mode == "authoritative_chemistry_required"
+    assert chemistry.confidence == "low"
+    assert len(chemistry.warnings) == 1
+    assert chemistry.donor_atom_ids == set()
+    assert chemistry.acceptor_atom_ids == set()
+    assert chemistry.aromatic_rings == []

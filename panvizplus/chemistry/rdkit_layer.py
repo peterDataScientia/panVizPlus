@@ -1,8 +1,8 @@
 """RDKit-backed ligand chemistry perception for panVizPlus.
 
-RDKit supplies molecular chemistry (connectivity/bond-order recovery, aromaticity,
-formal charge, pharmacophore features, and 2D depiction). panVizPlus remains
-responsible for protein-ligand interaction classification and geometric rules.
+RDKit supplies molecular chemistry when the ligand graph is chemically valid.
+panVizPlus does not force bond-order perception on an invalid or incomplete PDB
+graph; in that case it degrades safely and asks for authoritative chemistry.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class LigandChemistry:
     bond_orders: dict[tuple[int, int], float] = field(default_factory=dict)
     confidence: str = "high"
     source: str = "rdkit"
-    reconstruction_mode: str = "pdb_connectivity"
+    reconstruction_mode: str = "rdkit_bond_orders"
     warnings: list[str] = field(default_factory=list)
 
 
@@ -61,16 +61,18 @@ def build_ligand_chemistry(
     }
     inferred_charge = sum(a.formal_charge or 0 for a in atoms)
     charge = int(net_charge if net_charge is not None else inferred_charge)
+
+    mol, rd_idx_to_atom_id, atom_id_to_rd_idx = _coordinate_mol(
+        atoms, ligand_bonds, preserve_input_charges=True
+    )
+    warnings: list[str] = []
     confidence = (
         "high"
         if net_charge is not None or any(a.formal_charge is not None for a in atoms)
         else "medium"
     )
-    warnings: list[str] = []
-
-    mol, rd_idx_to_atom_id, atom_id_to_rd_idx = _coordinate_mol(atoms, ligand_bonds)
-    reconstruction_mode = "pdb_connectivity"
     source = "rdkit_BaseFeatures+DetermineBondOrders"
+    reconstruction_mode = "rdkit_bond_orders"
 
     try:
         rdDetermineBonds.DetermineBondOrders(
@@ -79,71 +81,50 @@ def build_ligand_chemistry(
             allowChargedFragments=True,
             embedChiral=True,
         )
-        Chem.SanitizeMol(mol)
-    except Exception as first_exc:
-        # PDB CONECT records and distance-derived local bonds can occasionally
-        # over-connect a ligand. Rebuild the graph from 3D coordinates instead
-        # of asking bond-order perception to rescue an impossible graph.
-        rebuilt, rd_idx_to_atom_id, atom_id_to_rd_idx = _coordinate_mol(atoms, set())
-        try:
-            rdDetermineBonds.DetermineBonds(
-                rebuilt,
-                charge=charge,
-                covFactor=1.3,
-                allowChargedFragments=True,
-                embedChiral=True,
-                useVdw=True,
-            )
-            Chem.SanitizeMol(rebuilt)
-            mol = rebuilt
-            reconstruction_mode = "rdkit_3d_connectivity_rebuild"
-            source = "rdkit_BaseFeatures+DetermineBonds_from_3D"
-        except Exception as second_exc:
-            # Keep the app operational, but do not run SMARTS chemistry on an
-            # invalid graph. Downstream feature sets remain intentionally sparse.
-            mol, rd_idx_to_atom_id, atom_id_to_rd_idx = _coordinate_mol(
-                atoms, ligand_bonds
-            )
-            mol.UpdatePropertyCache(strict=False)
-            try:
-                Chem.GetSymmSSSR(mol)
-            except Exception:
-                pass
-            confidence = "low"
-            reconstruction_mode = "connectivity_only_fallback"
-            source = "pdb_connectivity_only"
-            warnings.append(
-                "Ligand chemistry could not be reconstructed reliably from this PDB "
-                f"({type(first_exc).__name__}; 3D rebuild: {type(second_exc).__name__}). "
-                "Verify the ligand net charge or provide SDF/MOL2/CCD chemistry."
-            )
-
-    if net_charge is None and not any(a.formal_charge is not None for a in atoms):
-        warnings.append(
-            "Ligand net charge was not explicitly supplied; chemistry perception used charge 0."
+        chemistry = LigandChemistry(
+            mol=mol,
+            selector=selector,
+            rd_idx_to_atom_id=rd_idx_to_atom_id,
+            atom_id_to_rd_idx=atom_id_to_rd_idx,
+            confidence=confidence,
+            source=source,
+            reconstruction_mode=reconstruction_mode,
+            warnings=warnings,
         )
-
-    chemistry = LigandChemistry(
-        mol=mol,
-        selector=selector,
-        rd_idx_to_atom_id=rd_idx_to_atom_id,
-        atom_id_to_rd_idx=atom_id_to_rd_idx,
-        confidence=confidence,
-        source=source,
-        reconstruction_mode=reconstruction_mode,
-        warnings=warnings,
-    )
-
-    if reconstruction_mode != "connectivity_only_fallback":
         _populate_features(chemistry)
-    else:
+        return chemistry
+    except Exception as exc:
+        # Heavy-atom PDB files may not contain enough chemistry to recover
+        # bond orders reliably. Do not cascade into sanitization/SMARTS errors
+        # or invent donor/acceptor/aromatic features from an invalid graph.
+        fallback, rd_idx_to_atom_id, atom_id_to_rd_idx = _coordinate_mol(
+            atoms, ligand_bonds, preserve_input_charges=True
+        )
+        fallback.UpdatePropertyCache(strict=False)
+        chemistry = LigandChemistry(
+            mol=fallback,
+            selector=selector,
+            rd_idx_to_atom_id=rd_idx_to_atom_id,
+            atom_id_to_rd_idx=atom_id_to_rd_idx,
+            confidence="low",
+            source="pdb_connectivity_only",
+            reconstruction_mode="authoritative_chemistry_required",
+            warnings=[
+                "RDKit could not assign a chemically valid bond-order model from this PDB "
+                f"({type(exc).__name__}). Interaction classes that require reliable ligand "
+                "donor/acceptor, charge, or aromaticity perception are withheld. "
+                "Use the correct ligand net charge and provide CCD/SDF/MOL2 chemistry."
+            ],
+        )
         _populate_graph_metadata(chemistry)
-    return chemistry
+        return chemistry
 
 
 def _coordinate_mol(
     atoms: list[Atom],
     bonds: set[tuple[int, int]],
+    *,
+    preserve_input_charges: bool,
 ) -> tuple[Chem.Mol, dict[int, int], dict[int, int]]:
     rw = Chem.RWMol()
     rd_idx_to_atom_id: dict[int, int] = {}
@@ -151,6 +132,8 @@ def _coordinate_mol(
 
     for atom in atoms:
         rd_atom = Chem.Atom(atom.element.title())
+        if preserve_input_charges and atom.formal_charge is not None:
+            rd_atom.SetFormalCharge(int(atom.formal_charge))
         idx = rw.AddAtom(rd_atom)
         rd_idx_to_atom_id[idx] = atom.atom_id
         atom_id_to_rd_idx[atom.atom_id] = idx
@@ -184,7 +167,6 @@ def _populate_features(chemistry: LigandChemistry) -> None:
         "Hydrophobe": chemistry.hydrophobe_atom_ids,
         "LumpedHydrophobe": chemistry.hydrophobe_atom_ids,
     }
-
     for feature in factory.GetFeaturesForMol(mol):
         target = family_to_target.get(feature.GetFamily())
         if target is None:
@@ -199,9 +181,6 @@ def _populate_features(chemistry: LigandChemistry) -> None:
     for atom in mol.GetAtoms():
         atom_id = chemistry.rd_idx_to_atom_id[atom.GetIdx()]
         charge = int(atom.GetFormalCharge())
-
-        # BaseFeatures intentionally does not label every aliphatic carbon as a
-        # hydrophobe. Augment from the sanitized RDKit molecular graph.
         if charge == 0 and atom.GetAtomicNum() == 6:
             heavy_neighbors = [n for n in atom.GetNeighbors() if n.GetAtomicNum() != 1]
             if all(n.GetAtomicNum() in {6, 9, 17, 35, 53} for n in heavy_neighbors):
@@ -213,9 +192,7 @@ def _populate_features(chemistry: LigandChemistry) -> None:
 
     ring_info = mol.GetRingInfo()
     for ring in ring_info.AtomRings():
-        if len(ring) < 5:
-            continue
-        if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in ring):
+        if len(ring) >= 5 and all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in ring):
             chemistry.aromatic_rings.append(
                 tuple(chemistry.rd_idx_to_atom_id[int(i)] for i in ring)
             )
@@ -242,12 +219,8 @@ def _populate_graph_metadata(chemistry: LigandChemistry) -> None:
 
 def ligand_2d_coordinates(chemistry: LigandChemistry) -> dict[int, tuple[float, float]]:
     mol = Chem.Mol(chemistry.mol)
-    try:
-        rdDepictor.Compute2DCoords(mol)
-    except Exception:
-        # Even a connectivity-only fallback should remain drawable.
-        mol.UpdatePropertyCache(strict=False)
-        rdDepictor.Compute2DCoords(mol, canonOrient=False)
+    mol.UpdatePropertyCache(strict=False)
+    rdDepictor.Compute2DCoords(mol, canonOrient=True)
     conf = mol.GetConformer()
     return {
         chemistry.rd_idx_to_atom_id[idx]: (
