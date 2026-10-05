@@ -24,7 +24,31 @@ def test_rdkit_recognizes_aromatic_ring_from_connectivity():
     assert any(abs(order - 1.5) < 1e-6 for order in chemistry.bond_orders.values())
 
 
-def test_rdkit_amide_feature_perception():
+def test_rdkit_amide_feature_perception_with_explicit_hydrogens():
+    # Acetamide CH3-C(=O)-NH2 with explicit hydrogens, which is the supported
+    # DetermineBondOrders use case.
+    s = NormalizedStructure(
+        atoms=[
+            atom(1, "C1", "C", (-1.5, 0.0, 0.0)),
+            atom(2, "C2", "C", (0.0, 0.0, 0.0)),
+            atom(3, "O1", "O", (1.2, 0.7, 0.0)),
+            atom(4, "N1", "N", (1.2, -0.7, 0.0)),
+            atom(5, "H1", "H", (-2.0, 0.9, 0.0)),
+            atom(6, "H2", "H", (-2.0, -0.45, 0.8)),
+            atom(7, "H3", "H", (-2.0, -0.45, -0.8)),
+            atom(8, "H4", "H", (1.8, -0.2, 0.6)),
+            atom(9, "H5", "H", (1.8, -0.2, -0.6)),
+        ],
+        bonds={(1,2),(2,3),(2,4),(1,5),(1,6),(1,7),(4,8),(4,9)},
+    )
+    chemistry = build_ligand_chemistry(s, "LIG:Z:1", net_charge=0)
+    assert chemistry.reconstruction_mode == "rdkit_bond_orders"
+    assert 3 in chemistry.acceptor_atom_ids
+    assert 4 in chemistry.donor_atom_ids
+    assert 4 not in chemistry.acceptor_atom_ids
+
+
+def test_heavy_atom_only_amide_degrades_without_false_features():
     s = NormalizedStructure(
         atoms=[
             atom(1, "C1", "C", (-1.5, 0.0, 0.0)),
@@ -32,12 +56,13 @@ def test_rdkit_amide_feature_perception():
             atom(3, "O1", "O", (1.2, 0.7, 0.0)),
             atom(4, "N1", "N", (1.2, -0.7, 0.0)),
         ],
-        bonds={(1, 2), (2, 3), (2, 4)},
+        bonds={(1,2),(2,3),(2,4)},
     )
     chemistry = build_ligand_chemistry(s, "LIG:Z:1", net_charge=0)
-    assert 3 in chemistry.acceptor_atom_ids
-    assert 4 in chemistry.donor_atom_ids
-    assert 4 not in chemistry.acceptor_atom_ids
+    assert chemistry.reconstruction_mode == "authoritative_chemistry_required"
+    assert chemistry.acceptor_atom_ids == set()
+    assert chemistry.donor_atom_ids == set()
+    assert len(chemistry.warnings) == 1
 
 
 def test_rdkit_preserves_quaternary_ammonium_charge():
