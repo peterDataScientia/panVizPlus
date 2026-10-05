@@ -29,6 +29,12 @@ interactions:
       missing_hydrogen_geometry:
         XDA: used_when_donor_neighbor_is_available
         DAY: used_when_acceptor_neighbor_is_available
+    diagnostics:
+      candidate_distance_max: 4.0
+      interpretation: >
+        Diagnostic screening radius only. It preserves nearby donor-acceptor
+        candidates for PASS/FAIL inspection and is not itself an H-bond
+        detection cutoff.
     confidence: architecture_high_numeric_modern_default_provisional
     note: >
       D-A distance and directional geometry are explicit research baselines.

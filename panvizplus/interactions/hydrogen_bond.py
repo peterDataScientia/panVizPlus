@@ -1,4 +1,4 @@
-"""Conventional hydrogen-bond detection for the first panVizPlus vertical slice."""
+"""Conventional hydrogen-bond detection and diagnostics for panVizPlus."""
 
 from __future__ import annotations
 
@@ -19,16 +19,25 @@ class _Orientation:
     ligand_is_donor: bool
 
 
-def detect_conventional_hbonds(
+def audit_conventional_hbonds(
     structure: NormalizedStructure,
     ligand_residue_name: str | None = None,
     ruleset: dict | None = None,
 ) -> list[InteractionRecord]:
+    """Evaluate nearby donor/acceptor candidates and retain PASS/FAIL evidence.
+
+    This diagnostic API is intentionally broader than detection. Candidates are
+    screened by a non-detection distance radius so rejected pairs remain
+    inspectable. A candidate is accepted only when every active detection
+    criterion passes.
+    """
     ruleset = ruleset or load_ruleset()
     rule = ruleset["interactions"]["conventional_hbond"]
     geometry = rule["geometry"]
+    diagnostics = rule.get("diagnostics", {})
 
     da_max = float(geometry["donor_acceptor_distance_max"])
+    screen_max = float(diagnostics.get("candidate_distance_max", max(4.0, da_max)))
     dha_min = float(geometry.get("dha_angle_min", 90.0))
     hay_min = float(geometry.get("hay_angle_min", 90.0))
     xda_min = float(geometry.get("xda_angle_min", 90.0))
@@ -55,7 +64,7 @@ def detect_conventional_hbonds(
         donor = amap[pair.donor.atom_id]
         acceptor = amap[pair.acceptor.atom_id]
         da = atom_distance(donor, acceptor)
-        if da > da_max:
+        if da > screen_max:
             continue
 
         criteria = [
@@ -65,7 +74,7 @@ def detect_conventional_hbonds(
                 "<=",
                 da_max,
                 "angstrom",
-                True,
+                da <= da_max,
             )
         ]
         measurements: dict[str, float | str | bool | None] = {
@@ -130,8 +139,20 @@ def detect_conventional_hbonds(
                 )
 
         angle_criteria = [c for c in criteria if c.name.endswith("_angle")]
-        if not angle_criteria or not all(c.passed for c in angle_criteria):
-            continue
+        if not angle_criteria:
+            criteria.append(
+                CriterionResult(
+                    "directional_geometry_available",
+                    False,
+                    "==",
+                    True,
+                    None,
+                    False,
+                )
+            )
+
+        accepted = all(c.passed for c in criteria)
+        rejection_reasons = [c.name for c in criteria if not c.passed]
 
         ligand_atom = donor if pair.ligand_is_donor else acceptor
         protein_atom = acceptor if pair.ligand_is_donor else donor
@@ -140,7 +161,7 @@ def detect_conventional_hbonds(
 
         results.append(
             InteractionRecord(
-                interaction_id=f"HBOND-{next(serial):04d}",
+                interaction_id=f"HBOND-AUDIT-{next(serial):04d}",
                 interaction_type="conventional_hbond",
                 ligand_site=_site_label(ligand_atom),
                 protein_site=_site_label(protein_atom),
@@ -151,6 +172,9 @@ def detect_conventional_hbonds(
                 criteria=criteria,
                 measurements=measurements,
                 metadata={
+                    "audit_status": "accepted" if accepted else "rejected",
+                    "rejection_reasons": rejection_reasons,
+                    "screening_distance_max": screen_max,
                     "geometry_mode": geometry_mode,
                     "donor_site": _site_label(donor),
                     "acceptor_site": _site_label(acceptor),
@@ -168,6 +192,23 @@ def detect_conventional_hbonds(
         )
 
     return _deduplicate(results)
+
+
+def detect_conventional_hbonds(
+    structure: NormalizedStructure,
+    ligand_residue_name: str | None = None,
+    ruleset: dict | None = None,
+) -> list[InteractionRecord]:
+    """Return only candidates that pass every active H-bond criterion."""
+    return [
+        record
+        for record in audit_conventional_hbonds(
+            structure,
+            ligand_residue_name=ligand_residue_name,
+            ruleset=ruleset,
+        )
+        if record.metadata.get("audit_status") == "accepted"
+    ]
 
 
 def _best_explicit_hydrogen(

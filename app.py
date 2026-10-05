@@ -30,7 +30,7 @@ print("APPCHK 06 — utils import OK", flush=True)
 from interactive_engine import build_editor_scene
 from scientific_records import build_scientific_records, build_figure_records, write_scientific_exports
 from panviz_version import PANVIZ_VERSION, PANVIZ_RENDERER_REVISION
-from panvizplus.analysis import analyze_pdb as panvizplus_analyze_pdb
+from panvizplus.analysis import audit_pdb as panvizplus_audit_pdb
 from panvizplus.rules import load_ruleset
 print("APPCHK 07 — interactive_engine + v6 scientific data layer import OK", flush=True)
 
@@ -64,7 +64,7 @@ div[data-testid="stFileUploader"]{border:1px dashed #b8c8de;border-radius:14px;b
 """, unsafe_allow_html=True)
 print("APPCHK 11 — main CSS markdown OK", flush=True)
 print("APPCHK 12 — before panVizPlus header markdown", flush=True)
-st.markdown(f"""<div class="panviz-shell"><div class="panviz-brand"><div class="panviz-mark">🧬</div><div><div class="panviz-title">panVizPlus</div><div class="panviz-subtitle">Provenance-aware protein–ligand interaction analysis &amp; publication figure editor</div></div></div><div class="panviz-badges"><span class="panviz-badge">panVizPlus native audit</span><span class="panviz-badge">PLIP reference backend</span><span class="panviz-badge">Editable presentation layer</span><span class="panviz-badge">Molecular topology locked</span><span class="panviz-badge">v{PANVIZ_VERSION}</span></div></div>""", unsafe_allow_html=True)
+st.markdown(f"""<div class="panviz-shell"><div class="panviz-brand"><div class="panviz-mark">🧬</div><div><div class="panviz-title">panVizPlus</div><div class="panviz-subtitle">Provenance-aware protein–ligand interaction analysis &amp; publication figure editor</div></div></div><div class="panviz-badges"><span class="panviz-badge">Interaction analysis</span><span class="panviz-badge">Provenance-aware records</span><span class="panviz-badge">Editable presentation layer</span><span class="panviz-badge">Molecular topology locked</span><span class="panviz-badge">v{PANVIZ_VERSION}</span></div></div>""", unsafe_allow_html=True)
 print("APPCHK 13 — panVizPlus header markdown OK", flush=True)
 
 print("APPCHK 14 — before editor.html read", flush=True)
@@ -369,8 +369,10 @@ def _panvizplus_core_dataframe(records):
             "Ligand site": record.ligand_site,
             "Protein site": record.protein_site,
             "Residue": f"{record.residue_name}{record.residue_number}:{record.chain_id or '-'}",
+            "Status": str(record.metadata.get("audit_status", "accepted")).upper(),
             "D-A (Å)": record.measurements.get("donor_acceptor_distance"),
             "Geometry mode": record.metadata.get("geometry_mode"),
+            "Failed criteria": ", ".join(record.metadata.get("rejection_reasons", [])) or "—",
             "Criteria": criterion_text,
             "Detector": record.detector,
             "Detector version": record.detector_version,
@@ -505,7 +507,7 @@ result_key=_sha256_bytes(json.dumps(result_key_payload,sort_keys=True).encode())
 
 if analyze:
     results_root=work_root/"panVizPlus_results";results_root.mkdir(parents=True,exist_ok=True)
-    with st.spinner("Running panVizPlus native audit, PLIP reference analysis, and the interactive editor…"):
+    with st.spinner("Running interaction analysis and building the interactive editor…"):
         try:
             analysis_obj=plip_2d_interactions(
                 str(pdb_path),
@@ -524,7 +526,7 @@ if analyze:
                 scientific_tables,
                 interaction_dir,
             )
-            core_records,core_warnings=panvizplus_analyze_pdb(
+            core_records,core_warnings=panvizplus_audit_pdb(
                 analysis_obj["file_prot"],
                 selected_site.split(":")[0],
             )
@@ -602,17 +604,16 @@ if not result or result.get("key")!=result_key:
     st.stop()
 
 st.markdown('<div class="panviz-section"><h4>3 · Scientific summary</h4>', unsafe_allow_html=True)
+scientific_df=result.get("scientific_df", pd.DataFrame())
+interaction_classes=int(scientific_df["Interaction"].nunique()) if not scientific_df.empty and "Interaction" in scientific_df.columns else 0
 m1,m2,m3,m4=st.columns(4)
-m1.metric("panVizPlus native H-bonds", int(len(result.get("core_df", []))))
-m2.metric("PLIP reference records", int(len(result.get("scientific_df", []))))
+m1.metric("Detected interactions", int(len(scientific_df)))
+m2.metric("Interaction classes", interaction_classes)
 m3.metric("Binding site", result["selected_site"])
-m4.metric("Ruleset", result.get("ruleset_version", "draft"))
-for warning in result.get("core_warnings", []):
-    st.warning(warning)
+m4.metric("Figure interactions", int(len(result.get("figure_interaction_df", []))))
 st.caption(
-    "Detector provenance is preserved. The panVizPlus-native engine currently audits conventional "
-    "hydrogen bonds with explicit geometric evidence; PLIP supplies the broader eight-class reference "
-    "interaction layer used by the publication editor."
+    "panVizPlus presents one scientific interaction result set. Detector identity and raw provenance "
+    "are retained in the exported project files and methodology metadata."
 )
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -621,34 +622,56 @@ render_editor(result["scene"])
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown('<div class="panviz-section"><h4>5 · Scientific evidence & downloads</h4>', unsafe_allow_html=True)
-with st.expander("Interaction evidence table", expanded=False):
-    tab_native,tab_plip=st.tabs(["panVizPlus native", "PLIP reference"])
-    with tab_native:
-        core_df=result.get("core_df", pd.DataFrame())
-        if core_df.empty:
-            st.info("No panVizPlus-native conventional hydrogen bond passed the current draft rules.")
-        else:
-            st.dataframe(core_df, use_container_width=True, hide_index=True)
-        st.caption("Native rows retain measured geometry, rule criteria, detector version, and chemistry confidence.")
-    with tab_plip:
-        plip_df=result.get("scientific_df", pd.DataFrame())
-        if plip_df.empty:
-            st.info("PLIP returned no reference interaction records for this site.")
-        else:
-            st.dataframe(plip_df, use_container_width=True, hide_index=True)
-        st.caption("PLIP records remain explicitly labeled as reference-backend evidence.")
+with st.expander("Detected interaction table", expanded=False):
+    detected_df=result.get("scientific_df", pd.DataFrame())
+    if detected_df.empty:
+        st.info("No supported protein–ligand interactions were detected for this binding site.")
+    else:
+        st.dataframe(detected_df, use_container_width=True, hide_index=True)
+    st.caption("These are the scientific records represented by the analysis backend; raw detector provenance is preserved in the exports.")
 
-d1,d2,d3=st.columns(3)
-core_csv=Path(result["core_exports"]["csv"])
-core_json=Path(result["core_exports"]["json"])
+with st.expander("Advanced · Experimental H-bond validator", expanded=False):
+    st.warning(
+        "Experimental validation layer. It does not replace the main interaction result set and its "
+        "draft cutoffs are not claimed to reproduce BIOVIA Discovery Studio exactly."
+    )
+    core_df=result.get("core_df", pd.DataFrame())
+    if core_df.empty:
+        st.info("No donor–acceptor H-bond candidates were found inside the 4.0 Å diagnostic screening radius.")
+    else:
+        accepted=int((core_df["Status"]=="ACCEPTED").sum()) if "Status" in core_df.columns else 0
+        rejected=int((core_df["Status"]=="REJECTED").sum()) if "Status" in core_df.columns else 0
+        c1,c2,c3=st.columns(3)
+        c1.metric("Candidates screened", int(len(core_df)))
+        c2.metric("Accepted", accepted)
+        c3.metric("Rejected", rejected)
+        st.dataframe(core_df, use_container_width=True, hide_index=True)
+    for warning in result.get("core_warnings", []):
+        st.caption(f"Chemistry note: {warning}")
+    st.caption(
+        f"Experimental ruleset: {result.get('ruleset_id', 'panvizplus_v1')} "
+        f"({result.get('ruleset_version', 'draft')}). Rejected rows are intentionally retained so the failed "
+        "distance/angle/geometry criterion can be inspected."
+    )
+    core_csv=Path(result["core_exports"]["csv"])
+    core_json=Path(result["core_exports"]["json"])
+    e1,e2=st.columns(2)
+    with e1:
+        st.download_button("Download experimental audit CSV", data=core_csv.read_bytes(), file_name=core_csv.name, mime="text/csv", use_container_width=True)
+    with e2:
+        st.download_button("Download experimental audit JSON", data=core_json.read_bytes(), file_name=core_json.name, mime="application/json", use_container_width=True)
+
+plip_csv=Path(result["scientific_exports"]["csv"])
+plip_json=Path(result["scientific_exports"]["json"])
 project_zip=Path(result["project_zip"])
+d1,d2,d3=st.columns(3)
 with d1:
-    st.download_button("Download native CSV", data=core_csv.read_bytes(), file_name=core_csv.name, mime="text/csv", use_container_width=True)
+    st.download_button("Download interactions CSV", data=plip_csv.read_bytes(), file_name="panVizPlus_interactions.csv", mime="text/csv", use_container_width=True)
 with d2:
-    st.download_button("Download native JSON", data=core_json.read_bytes(), file_name=core_json.name, mime="application/json", use_container_width=True)
+    st.download_button("Download interactions JSON", data=plip_json.read_bytes(), file_name="panVizPlus_interactions.json", mime="application/json", use_container_width=True)
 with d3:
     st.download_button("Download complete project ZIP", data=project_zip.read_bytes(), file_name=project_zip.name, mime="application/zip", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown(f'<div class="panviz-foot">panVizPlus v{PANVIZ_VERSION} · native ruleset {result.get("ruleset_version", "draft")} · PLIP reference backend</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="panviz-foot">panVizPlus v{PANVIZ_VERSION} · provenance-aware interaction analysis</div>', unsafe_allow_html=True)
 

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from panvizplus.analysis import analyze_pdb
 from panvizplus.chemistry.pdb import read_pdb
-from panvizplus.interactions.hydrogen_bond import detect_conventional_hbonds
+from panvizplus.interactions.hydrogen_bond import audit_conventional_hbonds, detect_conventional_hbonds
 
 
 def _write(tmp_path: Path, text: str) -> Path:
@@ -64,3 +64,19 @@ END
 """
     _, warnings = analyze_pdb(_write(tmp_path, pdb), "LIG")
     assert any("bond orders" in warning for warning in warnings)
+
+
+def test_audit_retains_rejected_candidate(tmp_path):
+    pdb = """ATOM      1  CE  LYS A  20       1.400   0.000   0.000  1.00 20.00           C
+ATOM      2  NZ  LYS A  20       0.000   0.000   0.000  1.00 20.00           N
+HETATM    3  O1  LIG B   1       2.900   0.000   0.000  1.00 20.00           O
+HETATM    4  C1  LIG B   1       4.000   0.000   0.000  1.00 20.00           C
+CONECT    1    2
+CONECT    3    4
+END
+"""
+    audited = audit_conventional_hbonds(read_pdb(_write(tmp_path, pdb)), "LIG")
+    assert len(audited) == 1
+    assert audited[0].metadata["audit_status"] == "rejected"
+    assert "XDA_angle" in audited[0].metadata["rejection_reasons"]
+    assert not audited[0].passes_all_criteria
