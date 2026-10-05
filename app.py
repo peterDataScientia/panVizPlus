@@ -50,7 +50,7 @@ st.markdown(
   <div class="badges">
     <span class="badge">panVizPlus-native engine</span>
     <span class="badge">RDKit chemistry</span>
-    <span class="badge">panVizPlus interaction rules</span>
+    <span class="badge">panVizPlus interaction rules</span>\n    <span class="badge">PanViz publication rendering</span>
     <span class="badge">Rule provenance</span>
     <span class="badge">PDB + PDBQT</span>
     <span class="badge">v""" + PANVIZ_VERSION + """</span>
@@ -507,7 +507,7 @@ analyze_tab, audit_tab, compare_tab, publish_tab = st.tabs(
 )
 
 with analyze_tab:
-    st.markdown('<div class="card"><h4>Publication interaction diagram</h4>', unsafe_allow_html=True)
+    st.markdown('<div class="card"><h4>PanViz publication interaction diagram</h4>', unsafe_allow_html=True)
     components.html(result["svg"], height=int(fig_height) + 20, scrolling=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
