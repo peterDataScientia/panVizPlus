@@ -86,15 +86,15 @@ def render_interaction_svg(
         float(np.mean([xy[1] for xy in coords.values()])),
     )
 
-    residues = []
-    seen = set()
-    for rec in records:
-        key = (rec.residue_name, rec.residue_number, rec.chain_id or "-")
-        if key not in seen:
-            seen.add(key)
-            residues.append(key)
-
-    res_xy = _residue_positions(residues, width, height, panel_w, panel_h)
+    res_xy = _residue_positions(
+        records,
+        atom_by_name,
+        coords,
+        ligand_center,
+        chemistry,
+        width,
+        height,
+    )
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
@@ -347,19 +347,172 @@ def _strip_outer_svg(svg: str) -> str:
     return inner
 
 
-def _residue_positions(residues, width, height, panel_w, panel_h):
+def _residue_positions(
+    records,
+    atom_by_name,
+    coords,
+    ligand_center,
+    chemistry,
+    width,
+    height,
+):
+    """Place residues locally around the ligand, not on an artificial circle.
+
+    This adapts the established PanViz placement principle: each residue starts
+    from the mean 2D position of the ligand atom/ring sites it interacts with,
+    then a greedy candidate search moves the label outward while avoiding the
+    ligand, previously placed residue labels, and interaction-line crossings.
+    """
+    if not records:
+        return {}
+
+    grouped = {}
+    for rec in records:
+        key = (rec.residue_name, rec.residue_number, rec.chain_id or "-")
+        grouped.setdefault(key, []).append(rec)
+
+    atom_points = list(coords.values())
+    if atom_points:
+        atom_xy = np.asarray(atom_points, dtype=float)
+        lig_min = atom_xy.min(axis=0)
+        lig_max = atom_xy.max(axis=0)
+    else:
+        lig_min = np.asarray(ligand_center, dtype=float)
+        lig_max = np.asarray(ligand_center, dtype=float)
+
+    label_w = 104.0
+    label_h = 36.0
+    margin = 16.0
+    cx, cy = ligand_center
+
+    # Residues anchored closer to the ligand center are placed first, matching
+    # the old PanViz greedy strategy and giving constrained contacts priority.
+    residue_anchors = []
+    for key, recs in grouped.items():
+        anchors = [
+            _ligand_anchor(rec, atom_by_name, coords, ligand_center, chemistry)
+            for rec in recs
+        ]
+        ax = float(np.mean([p[0] for p in anchors]))
+        ay = float(np.mean([p[1] for p in anchors]))
+        residue_anchors.append((key, ax, ay))
+
+    residue_anchors.sort(key=lambda z: ((z[1] - cx) ** 2 + (z[2] - cy) ** 2) ** 0.5)
+
+    placed_boxes = []
+    placed_segments = []
     positions = {}
-    if not residues:
-        return positions
-    radius_x = max(panel_w * 0.72, width * 0.35)
-    radius_y = max(panel_h * 0.72, height * 0.35)
-    for i, key in enumerate(residues):
-        angle = -pi / 2 + (2 * pi * i / len(residues))
-        positions[key] = (
-            width / 2 + radius_x * cos(angle),
-            height / 2 + radius_y * sin(angle),
-        )
+
+    for key, anchor_x, anchor_y in residue_anchors:
+        vx, vy = anchor_x - cx, anchor_y - cy
+        vlen = (vx * vx + vy * vy) ** 0.5
+
+        # If the interaction site lies near the ligand centroid, use a stable
+        # deterministic direction based on residue identity rather than forcing
+        # every such residue onto the same radial line.
+        if vlen < 12.0:
+            token = f"{key[0]}:{key[1]}:{key[2]}"
+            phase = (sum(ord(ch) for ch in token) % 360) * pi / 180.0
+            ux, uy = cos(phase), sin(phase)
+        else:
+            ux, uy = vx / vlen, vy / vlen
+
+        nx, ny = -uy, ux
+        candidates = []
+        for radial in (58, 72, 88, 106, 128, 154, 182):
+            for tangent in (0, 14, -14, 28, -28, 44, -44, 64, -64):
+                candidates.append(
+                    (
+                        anchor_x + ux * radial + nx * tangent,
+                        anchor_y + uy * radial + ny * tangent,
+                    )
+                )
+
+        best = None
+        best_score = float("inf")
+        for px, py in candidates:
+            if (
+                px - label_w / 2 < margin
+                or px + label_w / 2 > width - margin
+                or py - label_h / 2 < margin
+                or py + label_h / 2 > height - margin
+            ):
+                continue
+
+            if any(
+                _boxes_overlap(
+                    px, py, label_w, label_h,
+                    bx, by, bw, bh,
+                    gap=10.0,
+                )
+                for bx, by, bw, bh in placed_boxes
+            ):
+                continue
+
+            score = ((px - anchor_x) ** 2 + (py - anchor_y) ** 2) ** 0.5 * 0.22
+
+            # Strongly discourage labels from sitting on the molecular drawing.
+            for ax, ay in atom_points:
+                d = ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+                if d < 34:
+                    score += 1800
+                elif d < 58:
+                    score += (58 - d) * 18
+
+            # Mild penalty for occupying the ligand bounding region even when
+            # not directly on an atom; this keeps whitespace around chemistry.
+            if (
+                lig_min[0] - 20 < px < lig_max[0] + 20
+                and lig_min[1] - 20 < py < lig_max[1] + 20
+            ):
+                score += 800
+
+            # Preserve the PanViz idea of moving labels outward from the ligand.
+            outward = (px - anchor_x) * ux + (py - anchor_y) * uy
+            score -= outward * 0.10
+
+            # Prefer routes that do not cross previously accepted interaction
+            # lines. Crossings are a major source of unreadable publication art.
+            for x1, y1, x2, y2 in placed_segments:
+                if _segments_intersect(anchor_x, anchor_y, px, py, x1, y1, x2, y2):
+                    score += 500
+
+            if score < best_score:
+                best_score = score
+                best = (px, py)
+
+        if best is None:
+            # Deterministic emergency placement near the local anchor.
+            px = min(max(anchor_x + ux * 110, label_w / 2 + margin), width - label_w / 2 - margin)
+            py = min(max(anchor_y + uy * 110, label_h / 2 + margin), height - label_h / 2 - margin)
+            best = (px, py)
+
+        px, py = best
+        positions[key] = best
+        placed_boxes.append((px, py, label_w, label_h))
+        placed_segments.append((anchor_x, anchor_y, px, py))
+
     return positions
+
+
+def _boxes_overlap(cx, cy, w, h, bx, by, bw, bh, gap=4.0):
+    return not (
+        cx + w / 2 + gap < bx - bw / 2
+        or cx - w / 2 - gap > bx + bw / 2
+        or cy + h / 2 + gap < by - bh / 2
+        or cy - h / 2 - gap > by + bh / 2
+    )
+
+
+def _segments_intersect(ax, ay, bx, by, cx, cy, dx, dy):
+    def orient(px, py, qx, qy, rx, ry):
+        return (qx - px) * (ry - py) - (qy - py) * (rx - px)
+
+    o1 = orient(ax, ay, bx, by, cx, cy)
+    o2 = orient(ax, ay, bx, by, dx, dy)
+    o3 = orient(cx, cy, dx, dy, ax, ay)
+    o4 = orient(cx, cy, dx, dy, bx, by)
+    return (o1 * o2 < 0) and (o3 * o4 < 0)
 
 
 def _ligand_anchor(rec, atom_by_name, coords, center, chemistry):
