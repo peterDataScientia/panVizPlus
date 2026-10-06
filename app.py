@@ -67,7 +67,7 @@ div[data-testid="stFileUploader"]{border:1px dashed #b8c8de;border-radius:14px;b
     </div>
   </div>
   <div class="panviz-badges">
-    <span class="panviz-badge">panVizPlus-native interaction analysis</span>
+    <span class="panviz-badge">panVizPlus-native engine</span>
     <span class="panviz-badge">PanViz presentation/editor layer</span>
     <span class="panviz-badge">Editable presentation layer</span>
     <span class="panviz-badge">Molecular topology locked</span>
