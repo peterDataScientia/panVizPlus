@@ -18,7 +18,11 @@ from panvizplus.audit import build_analysis_audit, hbond_audit_rows
 from panvizplus.chemistry.pdb import read_pdb
 from panvizplus.chemistry.rdkit_layer import build_ligand_chemistry
 from panvizplus.interactions.engine import analyze_structure
-from panvizplus.rendering import (\n    build_editor_scene,\n    render_editor_html,\n    render_interaction_svg,\n)
+from panvizplus.rendering import (
+    build_editor_scene,
+    render_editor_html,
+    render_interaction_svg,
+)
 from panvizplus.reproducibility import (
     build_figure_caption,
     build_manifest,
