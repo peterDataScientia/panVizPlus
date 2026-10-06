@@ -18,7 +18,7 @@ from panvizplus.audit import build_analysis_audit, hbond_audit_rows
 from panvizplus.chemistry.pdb import read_pdb
 from panvizplus.chemistry.rdkit_layer import build_ligand_chemistry
 from panvizplus.interactions.engine import analyze_structure
-from panvizplus.rendering import render_interaction_svg
+from panvizplus.rendering import (\n    build_editor_scene,\n    render_editor_html,\n    render_interaction_svg,\n)
 from panvizplus.reproducibility import (
     build_figure_caption,
     build_manifest,
@@ -29,37 +29,50 @@ from panvizplus.reproducibility import (
 from panvizplus.rules import list_rulesets, load_ruleset
 
 
-st.set_page_config(page_title=f"panVizPlus {PANVIZ_VERSION}", page_icon="🧬", layout="wide")
+st.set_page_config(
+    page_title=f"panVizPlus {PANVIZ_VERSION}",
+    page_icon="🧬",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 st.markdown(
     """
 <style>
-:root{--navy:#143761;--ink:#16243a;--muted:#68788d;--line:#dce4ef}
-.block-container{padding-top:1.2rem;padding-bottom:2rem;max-width:1480px}
-.hero{border:1px solid #dbe3ee;border-radius:18px;padding:18px 20px;background:linear-gradient(135deg,#f7faff,#fff 55%,#f4f7fb);box-shadow:0 8px 28px rgba(24,54,90,.07);margin-bottom:14px}
-.title{font-size:2rem;font-weight:800;color:var(--ink);letter-spacing:-.5px}
-.sub{color:var(--muted);font-size:.95rem;margin-top:4px}
-.badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
-.badge{font-size:.72rem;font-weight:700;color:#34506f;background:#eef4fb;border:1px solid #dce7f3;border-radius:999px;padding:5px 9px}
-.card{border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:#fff;box-shadow:0 4px 14px rgba(31,55,88,.05);margin:10px 0}
-.card h4{margin:0 0 8px;color:var(--navy);font-size:13px}
-.foot{color:#7a8798;font-size:.74rem;margin-top:10px}
+:root{--pv-navy:#143761;--pv-blue:#1f5aa6;--pv-ink:#16243a;--pv-muted:#65748b;--pv-line:#dce4ef}
+.block-container{padding-top:1.2rem;padding-bottom:2.2rem;max-width:1520px}
+.panviz-shell{border:1px solid #dbe3ee;border-radius:18px;padding:18px 20px 16px;background:linear-gradient(135deg,#f7faff 0%,#ffffff 52%,#f4f7fb 100%);box-shadow:0 8px 28px rgba(24,54,90,.07);margin-bottom:16px}
+.panviz-brand{display:flex;align-items:center;gap:12px}
+.panviz-mark{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;color:white;font-size:22px;font-weight:800;background:linear-gradient(135deg,#1d5da9,#143761);box-shadow:0 5px 14px rgba(20,55,97,.24)}
+.panviz-title{font-size:2.0rem;font-weight:800;letter-spacing:-.6px;color:var(--pv-ink);line-height:1.05}
+.panviz-subtitle{color:var(--pv-muted);font-size:.94rem;margin-top:3px}
+.panviz-badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.panviz-badge{font-size:.72rem;font-weight:700;color:#34506f;background:#eef4fb;border:1px solid #dce7f3;border-radius:999px;padding:5px 9px}
+.panviz-section{border:1px solid var(--pv-line);border-radius:14px;padding:12px 14px;background:#fff;box-shadow:0 4px 14px rgba(31,55,88,.05);margin:10px 0}
+.panviz-section h4{margin:0 0 8px;color:var(--pv-navy);font-size:13px}
+div[data-testid="stFileUploader"]{border:1px dashed #b8c8de;border-radius:14px;background:#fbfdff;padding:4px}
+.stButton>button{border-radius:9px;font-weight:700}
+.stDownloadButton>button{border-radius:9px}
+.panviz-foot{color:#7a8798;font-size:.73rem;margin-top:10px}
 </style>
-<div class="hero">
-  <div class="title">panVizPlus</div>
-  <div class="sub">Native protein–ligand interaction analysis with explicit, versioned scientific rules.</div>
-  <div class="badges">
-    <span class="badge">panVizPlus-native engine</span>
-    <span class="badge">RDKit chemistry</span>
-    <span class="badge">panVizPlus interaction rules</span>\n    <span class="badge">PanViz publication rendering</span>
-    <span class="badge">Rule provenance</span>
-    <span class="badge">PDB + PDBQT</span>
-    <span class="badge">v""" + PANVIZ_VERSION + """</span>
+<div class="panviz-shell">
+  <div class="panviz-brand">
+    <div class="panviz-mark">🧬</div>
+    <div>
+      <div class="panviz-title">panVizPlus</div>
+      <div class="panviz-subtitle">Protein–ligand interaction visualization &amp; publication figure editor</div>
+    </div>
+  </div>
+  <div class="panviz-badges">
+    <span class="panviz-badge">panVizPlus-native interaction analysis</span>
+    <span class="panviz-badge">PanViz presentation/editor layer</span>
+    <span class="panviz-badge">Editable presentation layer</span>
+    <span class="panviz-badge">Molecular topology locked</span>
+    <span class="panviz-badge">v""" + PANVIZ_VERSION + """</span>
   </div>
 </div>
 """,
     unsafe_allow_html=True,
 )
-
 
 def _workspace() -> Path:
     if "pv_native_root" not in st.session_state or not Path(st.session_state.pv_native_root).exists():
@@ -283,7 +296,7 @@ def _custom_rules() -> dict:
 
 
 root = _workspace()
-st.markdown('<div class="card"><h4>1 · Input structure</h4>', unsafe_allow_html=True)
+st.markdown('<div class="panviz-section"><h4>1 · Input structure</h4>', unsafe_allow_html=True)
 mode = st.radio("Input mode", ["PDB complex", "Docking PDBQT"], horizontal=True)
 
 source_pdb = None
@@ -340,7 +353,7 @@ if not ligand_residues:
     st.error("No non-water small-molecule HETATM residue was found.")
     st.stop()
 
-st.markdown('<div class="card"><h4>2 · Analysis setup</h4>', unsafe_allow_html=True)
+st.markdown('<div class="panviz-section"><h4>2 · Analysis setup</h4>', unsafe_allow_html=True)
 ligand_tuple = st.selectbox(
     "Ligand",
     ligand_residues,
@@ -399,6 +412,14 @@ if run_analysis:
             int(fig_height),
             ligand_net_charge=int(ligand_net_charge),
         )
+        scene = build_editor_scene(
+            structure,
+            ligand_selector,
+            records,
+            int(fig_width),
+            int(fig_height),
+            ligand_net_charge=int(ligand_net_charge),
+        )
         chemistry_info = {
             "source": chemistry.source,
             "reconstruction_mode": chemistry.reconstruction_mode,
@@ -440,6 +461,7 @@ if run_analysis:
             "records": records,
             "frame": frame,
             "svg": svg,
+            "scene": scene,
             "warnings": list(structure.warnings) + list(chemistry.warnings),
             "rules": rules,
             "chemistry": chemistry_info,
@@ -485,7 +507,7 @@ audit = result["audit"]
 types = frame["Interaction"].nunique() if not frame.empty else 0
 residues = frame["Residue"].nunique() if not frame.empty else 0
 
-st.markdown('<div class="card"><h4>3 · Scientific summary</h4>', unsafe_allow_html=True)
+st.markdown('<div class="panviz-section"><h4>3 · Scientific summary</h4>', unsafe_allow_html=True)
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Accepted interactions", len(records))
 m2.metric("Interaction classes", int(types))
@@ -502,38 +524,20 @@ for warning in result["warnings"]:
     st.warning(warning)
 st.markdown("</div>", unsafe_allow_html=True)
 
-analyze_tab, audit_tab, compare_tab, publish_tab = st.tabs(
-    ["Analyze", "Audit", "Compare", "Publish"]
+st.markdown(
+    '<div class="panviz-section"><h4>4 · Interactive publication figure</h4>',
+    unsafe_allow_html=True,
 )
+editor_html = render_editor_html(result["scene"])
+initial_editor_height = max(700, min(1900, int(fig_height) + 180))
+components.html(editor_html, height=initial_editor_height, scrolling=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
-with analyze_tab:
-    st.markdown('<div class="card"><h4>PanViz publication interaction diagram</h4>', unsafe_allow_html=True)
-    components.html(result["svg"], height=int(fig_height) + 20, scrolling=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="card"><h4>Accepted scientific records</h4>', unsafe_allow_html=True)
-    if frame.empty:
-        if result.get("chemistry", {}).get("reconstruction_mode") == "authoritative_chemistry_required":
-            st.warning(
-                "No interaction passed the selected rules. Ligand chemistry also required "
-                "a conservative PDB fallback, so inspect the Audit tab before interpreting "
-                "the zero count biologically."
-            )
-        else:
-            st.info(
-                "No interaction passed the selected rules. Open the Audit tab to inspect "
-                "screened H-bond candidates and rule-level rejection reasons."
-            )
-    else:
-        st.dataframe(frame, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with audit_tab:
-    st.markdown("### Scientific audit")
+with st.expander("Native detector diagnostics & provenance", expanded=False):
     st.caption(
-        "H-bonds currently have full candidate PASS/FAIL auditing. Other interaction "
-        "classes report accepted records plus chemistry and spatial-screening context; "
-        "they are not yet presented as full rejected-candidate audits."
+        "This diagnostic section is part of the panVizPlus detection engine. "
+        "The figure editor, molecular drawing, residue styling, line styling, legend, "
+        "manual annotations, layout editing and publication exports use the PanViz presentation model."
     )
     a1, a2, a3, a4 = st.columns(4)
     a1.metric("Ligand heavy atoms", audit.get("ligand_heavy_atoms", 0))
@@ -541,140 +545,68 @@ with audit_tab:
     a3.metric("H-bond candidates", audit.get("hbond_audit", {}).get("candidate_total", 0))
     a4.metric("Rejected H-bonds", audit.get("hbond_audit", {}).get("rejected", 0))
 
-    st.markdown("#### Accepted interaction classes")
-    accepted_counts = audit.get("accepted_by_type", {})
-    if accepted_counts:
-        st.dataframe(
-            pd.DataFrame(
-                [{"Interaction": k, "Accepted": v} for k, v in accepted_counts.items()]
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info("No accepted interaction classes.")
-
-    st.markdown("#### Hydrogen-bond candidate audit")
     hb_rows = hbond_audit_rows(audit)
     if hb_rows:
-        hb_frame = pd.DataFrame(hb_rows)
-        status_filter = st.multiselect(
-            "Show H-bond candidate status",
-            ["accepted", "rejected"],
-            default=["accepted", "rejected"],
-        )
-        if status_filter:
-            hb_frame = hb_frame[hb_frame["Status"].isin(status_filter)]
-        st.dataframe(hb_frame, use_container_width=True, hide_index=True)
-        reasons = audit.get("hbond_audit", {}).get("rejection_reasons", {})
-        if reasons:
-            st.caption(
-                "Rejected by: "
-                + " · ".join(f"{name}: {count}" for name, count in reasons.items())
-            )
-    else:
-        st.info("No H-bond donor/acceptor candidate entered the diagnostic screening radius.")
+        st.dataframe(pd.DataFrame(hb_rows), use_container_width=True, hide_index=True)
 
     if audit.get("fallback_sources"):
         st.warning(
-            "Some accepted records used reduced-confidence chemistry fallbacks: "
+            "Reduced-confidence chemistry fallbacks: "
             + "; ".join(
                 f"{src} ({count})"
                 for src, count in audit["fallback_sources"].items()
             )
         )
 
-    with st.expander("Chemistry and audit provenance", expanded=False):
-        st.json(audit.get("chemistry", {}))
+    with st.expander("Chemistry and rule provenance", expanded=False):
+        st.json(result.get("chemistry", {}))
+        st.json(result["rules"]["metadata"])
         st.json(audit.get("audit_scope", {}))
 
-with compare_tab:
-    st.markdown("### Compare analyses")
-    history = st.session_state.get("analysis_history", [])
-    if len(history) < 2:
-        st.info(
-            "Run a second pose, ligand, charge state, or rule profile in this session. "
-            "panVizPlus will compare the two interaction fingerprints here."
-        )
-    else:
-        labels = [item["label"] for item in history]
-        left_col, right_col = st.columns(2)
-        with left_col:
-            idx_a = st.selectbox("Analysis A", range(len(history)), index=max(0, len(history)-2), format_func=lambda i: labels[i])
-        with right_col:
-            idx_b = st.selectbox("Analysis B", range(len(history)), index=len(history)-1, format_func=lambda i: labels[i], key="compare_b")
-        a = history[idx_a]
-        b = history[idx_b]
-        set_a = set(tuple(x) for x in a["signatures"])
-        set_b = set(tuple(x) for x in b["signatures"])
-        gained = sorted(set_b - set_a)
-        lost = sorted(set_a - set_b)
-        shared = sorted(set_a & set_b)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Shared", len(shared))
-        c2.metric("Gained in B", len(gained))
-        c3.metric("Lost from A", len(lost))
-        comparison_rows = (
-            [{"Change": "gained in B", "Interaction": x[0], "Residue": x[1], "Ligand site": x[2], "Protein site": x[3]} for x in gained]
-            + [{"Change": "lost from A", "Interaction": x[0], "Residue": x[1], "Ligand site": x[2], "Protein site": x[3]} for x in lost]
-        )
-        if comparison_rows:
-            st.dataframe(pd.DataFrame(comparison_rows), use_container_width=True, hide_index=True)
-        else:
-            st.success("The two analyses have the same interaction fingerprint.")
+st.markdown(
+    '<div class="panviz-section"><h4>5 · Scientific data & project bundle</h4>',
+    unsafe_allow_html=True,
+)
+csv_bytes = frame.to_csv(index=False).encode("utf-8")
+json_bytes = json.dumps(
+    [interaction_to_dict(r) for r in records],
+    indent=2,
+    ensure_ascii=False,
+).encode("utf-8")
 
-with publish_tab:
-    st.markdown("### Publication and reproducibility")
-    methods_text = build_methods_text(result["manifest"])
-    caption_text = build_figure_caption(result["manifest"])
-
-    st.markdown("#### Methods text")
-    st.text_area("Methods", methods_text, height=150, label_visibility="collapsed")
-    st.markdown("#### Figure caption")
-    st.text_area("Caption", caption_text, height=120, label_visibility="collapsed")
-
-    with st.expander("Rule and chemistry provenance", expanded=False):
-        st.subheader("Ligand chemistry")
-        st.json(result.get("chemistry", {}))
-        st.subheader("Rule profile")
-        st.json(result["rules"]["metadata"])
-        st.subheader("Complete rules used")
-        st.json(result["rules"])
-
-    csv_bytes = frame.to_csv(index=False).encode("utf-8")
-    json_bytes = json.dumps(
-        [interaction_to_dict(r) for r in records],
-        indent=2,
-        ensure_ascii=False,
-    ).encode("utf-8")
-
-    d1, d2, d3, d4 = st.columns(4)
-    with d1:
-        st.download_button(
-            "Interactions CSV", csv_bytes, "panVizPlus_interactions.csv",
-            "text/csv", use_container_width=True
-        )
-    with d2:
-        st.download_button(
-            "Interactions JSON", json_bytes, "panVizPlus_interactions.json",
-            "application/json", use_container_width=True
-        )
-    with d3:
-        st.download_button(
-            "Publication SVG", result["svg"].encode("utf-8"),
-            "panVizPlus_interaction_diagram.svg", "image/svg+xml",
-            use_container_width=True
-        )
-    with d4:
-        st.download_button(
-            "Reproducibility bundle", result["bundle"],
-            "panVizPlus_publication_bundle.zip", "application/zip",
-            use_container_width=True
-        )
-
-    st.caption(
-        "Bundle contents: figure.svg · interactions.csv/json · analysis_manifest.json · "
-        "rules_used.yaml · audit_summary.json · methods.txt · figure_caption.txt"
+d1, d2, d3 = st.columns(3)
+with d1:
+    st.download_button(
+        "Interactions CSV",
+        csv_bytes,
+        "panVizPlus_interactions.csv",
+        "text/csv",
+        use_container_width=True,
+    )
+with d2:
+    st.download_button(
+        "Interactions JSON",
+        json_bytes,
+        "panVizPlus_interactions.json",
+        "application/json",
+        use_container_width=True,
+    )
+with d3:
+    st.download_button(
+        "Project / reproducibility bundle",
+        result["bundle"],
+        "panVizPlus_project.zip",
+        "application/zip",
+        use_container_width=True,
     )
 
-st.markdown(f'<div class="foot">panVizPlus {PANVIZ_VERSION} · native interaction engine · auditable rule profiles</div>', unsafe_allow_html=True)
+st.caption(
+    "Figure SVG/PNG/PDF and Save/Load layout controls are inside the editor. "
+    "Scientific interaction records remain immutable while presentation annotations are editable."
+)
+st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown(
+    f'<div class="panviz-foot">panVizPlus {PANVIZ_VERSION} · PanViz presentation compatibility · panVizPlus-native detector</div>',
+    unsafe_allow_html=True,
+)
